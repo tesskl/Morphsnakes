@@ -80,21 +80,40 @@ def write_geotiff(fname, data, geo_transform, projection, data_type=gdal.GDT_Byt
 
 
 def extract_seeds(probs):
+    nbr_squares = 64
+    square_size = 8
     seed_list = []
     max_value = 0
-    max_pos_x = 0
-    max_pos_y = 0
-    for m in range(16):
-        for k in range(16):
-            for i in range(32):
-                for j in range(32):
-                    if probs[m*32 + i][k*32 + j] > max_value and probs[m*32 + i][k*32 + j] > 0.99:
-                        max_value = probs[m*32 + i][k*32 + j]
-                        max_pos_x = m*32 + i
-                        max_pos_y = k*32 + j
-            pixel = [max_pos_x, max_pos_y]
-            seed_list.append(pixel)
-            max_value = 0
+
+
+    for m in range(nbr_squares):
+        for k in range(nbr_squares):
+            next = False
+            for i in range(square_size):
+                for j in range(square_size):
+                    if not next:
+                        counter = 0
+                        if probs[m*square_size + i][k*square_size + j] > max_value and probs[m*square_size + i][k*square_size + j] > 0.99:
+                            next = False
+                            max_value = probs[m * square_size + i][k * square_size + j]
+                            max_pos_x = m * square_size + i
+                            max_pos_y = k * square_size + j
+                            pixel = [max_pos_x, max_pos_y]
+                            for s in range(-1, 2):
+                                for t in range(-1, 2):
+                                    x = max_pos_x + s
+                                    y = max_pos_y + t
+                                    if (x == -1 or y == -1) or (y == 0 and x == 0):
+                                        print("do")
+                                    else:
+                                        if probs[x][y] > 0.99:
+                                            counter += 1
+                        if counter >= 3:
+                            seed_list.append(pixel)
+                            max_value = 0
+                            next = True
+    print(seed_list)
+    print(len(seed_list))
     return seed_list
 
 
@@ -121,11 +140,16 @@ output_fname = "landsat_coastline/output_image_lr.tiff"
 train_data_path = "landsat_coastline/train"
 #validation_data_path = "landsat_coastline/test"""
 
+"""raster_data_path = "skane_harbour/image/skane_harbour.tif"
+output_fname = "skane_harbour/output_classifier.tiff"
+train_data_path = "skane_harbour/train"
+validation_data_path = "skane_harbour/test"
+# blurred_image_path = "capehorn_landpolygons/image/capehorn_blurred.tif"""
+
 raster_data_path = "skane/image/skane.tif"
 output_fname = "skane/output_classifier.tiff"
 train_data_path = "skane/train"
 validation_data_path = "skane/test"
-# blurred_image_path = "capehorn_landpolygons/image/capehorn_blurred.tif"
 
 # blurred_image = cv2.GaussianBlur(cv2.imread(raster_data_path),(9,9),0)
 # cv2.imshow('Blurred image', blurred_image)
@@ -155,7 +179,7 @@ training_samples = bands_data[is_train]
     decision_function_shape='ovr', degree=3, gamma='auto', kernel='rbf',
     max_iter=-1, probability=False, random_state=None, shrinking=True,
     tol=0.001, verbose=False)"""
-# classifier = svm.SVC(C=1, kernel='linear')
+# classifier = svm.SVC(C=1, kernel='linear', probability=True)
 # classifier = GaussianNB()
 # classifier = MLPClassifier(alpha=1)
 # classifier = LogisticRegression()

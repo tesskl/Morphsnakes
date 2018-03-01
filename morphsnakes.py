@@ -279,12 +279,12 @@ def start_snake():
 
     # Morphological ACWE. Initialization of the level-set.
     print("Running algorithm...")
-    macwe = MorphACWE(image_bw, smoothing=1, lambda1=10000, lambda2=10000)
+    macwe = MorphACWE(image_bw, smoothing=0, lambda1=10000, lambda2=10000)
 
     """Use one or two circles depending on what imaged is used (one or two water masses)"""
     #macwe.levelset = circle_levelset(image_bw.shape, (100, 100), 50)
     #macwe.levelset = two_circle_levelset(image_bw.shape, (image_bw.shape[0] / 2, image_bw.shape[1] / 2), 50)
-    macwe.levelset = multi_circle_levelset(image_bw.shape, 5, classify.seed_list)
+    macwe.levelset = multi_circle_levelset(image_bw.shape, 1, classify.seed_list)
     num_iters = 0
     temp_1_c0 = 0
     temp_1_c1 = 0
@@ -306,7 +306,7 @@ def start_snake():
     write_tiff(macwe.levelset, output_path, geo_transform, projection, rows, cols)
 
     """Comment this error line out if no truth mask is provided"""
-    #error(truth_path, output_path, geo_transform, projection, rows, cols, directory_path)
+    error(truth_path, output_path, geo_transform, projection, rows, cols, directory_path)
 
     return num_iters
 
