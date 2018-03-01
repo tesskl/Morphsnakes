@@ -6,6 +6,7 @@ import numpy as np
 from osgeo import gdal
 import time
 from scipy.ndimage import binary_dilation, binary_erosion
+import classify
 
 # COLORS = ["#008000", "#003cb3"]
 COLORS = ["#ffffff", "#000000"]
@@ -193,6 +194,15 @@ def two_circle_levelset(shape, center, sqradius):
     total = u + u2
     return total
 
+def multi_circle_levelset(shape, sqradius, seed_list):
+    """Build a binary function with a circle as the 0.5-levelset."""
+    total = 0
+    for i in range(len(seed_list)):
+        grid = np.mgrid[list(map(slice, shape))].T - (seed_list[i][0], seed_list[i][1])
+        phi = sqradius - np.sqrt(np.sum(grid.T ** 2, 0))
+        u = np.float_(phi > 0)
+        total = total + u
+    return total
 
 def write_tiff(data, output_path, geo_transform, projection, rows, cols):
     # Create output tiff from data
@@ -250,8 +260,8 @@ def error(truth_path, output_path, geo_transform, projection, rows, cols, direct
 
 def start_snake():
     # Load original image
-    directory_path = "two_side_water"
-    img_path = directory_path + "/two_side_water_small.tif"
+    directory_path = "skane"
+    img_path = directory_path + "/skane.tif"
     img_original = imread(img_path)
     image_bw = rgb2gray(img_original)
 
@@ -259,7 +269,7 @@ def start_snake():
     truth_path = directory_path + "/truth_mask.tif"
 
     # Define path to output
-    output_path = directory_path + "/output.tiff"
+    output_path = directory_path + "/output_multi.tiff"
 
     # Save projection, geo transform and shape from original image
     img_data = gdal.Open(img_path)
@@ -272,9 +282,9 @@ def start_snake():
     macwe = MorphACWE(image_bw, smoothing=1, lambda1=10000, lambda2=10000)
 
     """Use one or two circles depending on what imaged is used (one or two water masses)"""
-    #macwe.levelset = circle_levelset(image_bw.shape, (image_bw.shape[0] / 2, image_bw.shape[1] / 2), 50)
-    macwe.levelset = two_circle_levelset(image_bw.shape, (image_bw.shape[0] / 2, image_bw.shape[1] / 2), 50)
-
+    #macwe.levelset = circle_levelset(image_bw.shape, (100, 100), 50)
+    #macwe.levelset = two_circle_levelset(image_bw.shape, (image_bw.shape[0] / 2, image_bw.shape[1] / 2), 50)
+    macwe.levelset = multi_circle_levelset(image_bw.shape, 5, classify.seed_list)
     num_iters = 0
     temp_1_c0 = 0
     temp_1_c1 = 0
@@ -305,6 +315,5 @@ if __name__ == '__main__':
     start = time.time()
     num_iters = start_snake()
     end = time.time()
-
     print("Number of iterations required: ", num_iters)
     print("Execution time: ", end - start, " s")
