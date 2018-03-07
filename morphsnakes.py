@@ -38,8 +38,6 @@ _P3[8][[0, 1, 2], [2, 1, 0], :] = 1
 
 _aux = np.zeros(0)
 
-border_pixels = []
-
 
 def SI(u):
     """SI operator."""
@@ -76,6 +74,7 @@ def IS(u):
     for _aux_i, P_i in zip(_aux, P):
         _aux_i[:] = binary_dilation(u, P_i)
 
+    print(_aux.min(0))
     return _aux.min(0)
 
 
@@ -151,18 +150,11 @@ class MorphACWE(object):
             res = curvop(res)
 
         self._u = res
-        return c0, c1
-
-    def run(self, iterations):
-        """Run several iterations of the morphological Chan-Vese method."""
-        for i in range(iterations):
-            self.step()
+        return c0, c1, u
 
 
-''' Compares similarity between two contours. Returns a value between 0 and 1 (closer to 1 is more similar).
-'''
 
-
+""" Compares similarity between two contours. Returns a value between 0 and 1 (closer to 1 is more similar)."""
 def jaccard_similarity(union_nbr_elements, intersection_nbr_elements):
     similarity = intersection_nbr_elements / union_nbr_elements
     print("---------------------------")
@@ -181,6 +173,7 @@ def circle_levelset(shape, center, sqradius):
     u = np.float_(phi > 0)
     return u
 
+
 def two_circle_levelset(shape, center, sqradius):
     """Build a binary function with a circle as the 0.5-levelset."""
     grid2 = np.mgrid[list(map(slice, shape))].T - (10, 10)
@@ -194,6 +187,7 @@ def two_circle_levelset(shape, center, sqradius):
     total = u + u2
     return total
 
+
 def multi_circle_levelset(shape, sqradius, seed_list):
     """Build a binary function with a circle as the 0.5-levelset."""
     total = 0
@@ -203,6 +197,7 @@ def multi_circle_levelset(shape, sqradius, seed_list):
         u = np.float_(phi > 0)
         total = total + u
     return total
+
 
 def write_tiff(data, output_path, geo_transform, projection, rows, cols):
     # Create output tiff from data
@@ -250,18 +245,25 @@ def error(truth_path, output_path, geo_transform, projection, rows, cols, direct
             if truth_mask_array[j][i] == 0 or output_mask_array[j][i] == 1:
                 union_nbr_elements += 1
                 union[j][i] = 1
-    write_tiff(intersection, directory_path +"/intersection.tiff", geo_transform, projection, rows, cols)
+    write_tiff(intersection, directory_path + "/intersection.tiff", geo_transform, projection, rows, cols)
     write_tiff(union, directory_path + "/union.tiff", geo_transform, projection, rows, cols)
     write_tiff(result, directory_path + "/error.tiff", geo_transform, projection, rows, cols)
     print("Calculating similarity...")
 
     jaccard_similarity(union_nbr_elements, intersection_nbr_elements)
 
+def add_levelset(original_levelset, new_levelset):
+    result = np.array([[0 for x in range(512)] for y in range(512)])
+    for i in range(512):
+        for j in range(512):
+            if original_levelset[i][j] == 1 or new_levelset[i][j] == 1:
+                result[i][j] = 1
+    return result
 
 def start_snake():
     # Load original image
-    directory_path = "skane"
-    img_path = directory_path + "/skane.tif"
+    directory_path = classify.directory_path
+    img_path = directory_path + "/image/image.tif"
     img_original = imread(img_path)
     image_bw = rgb2gray(img_original)
 
@@ -277,33 +279,44 @@ def start_snake():
     projection = img_data.GetProjectionRef()
     rows, cols = img_original.shape[0], img_original.shape[1]
 
+    seed_list = classify.seed_list
+
     # Morphological ACWE. Initialization of the level-set.
     print("Running algorithm...")
-    macwe = MorphACWE(image_bw, smoothing=0, lambda1=10000, lambda2=10000)
+    macwe = MorphACWE(image_bw, smoothing=0, lambda1=1, lambda2=1)
 
     """Use one or two circles depending on what imaged is used (one or two water masses)"""
     #macwe.levelset = circle_levelset(image_bw.shape, (100, 100), 50)
-    #macwe.levelset = two_circle_levelset(image_bw.shape, (image_bw.shape[0] / 2, image_bw.shape[1] / 2), 50)
-    macwe.levelset = multi_circle_levelset(image_bw.shape, 1, classify.seed_list)
-    num_iters = 0
-    temp_1_c0 = 0
-    temp_1_c1 = 0
-    temp_2_c0 = 0
-    temp_2_c1 = 0
-    while True:
-        # Evolve.
-        c0, c1 = macwe.step()
-        if temp_1_c0 == c0 and temp_1_c1 == c1:
-            break
-        if temp_2_c0 == c0 and temp_2_c1 == c1:
-            break
-        temp_2_c0, temp_2_c1 = temp_1_c0, temp_1_c1
-        temp_1_c0, temp_1_c1 = c0, c1
-        num_iters += 1
+    # macwe.levelset = two_circle_levelset(image_bw.shape, (image_bw.shape[0] / 2, image_bw.shape[1] / 2), 50)
+
+    #macwe.levelset = multi_circle_levelset(image_bw.shape, 8, seed_list)
+    u = np.array([[0 for x in range(512)] for y in range(512)])
+
+    for i in range(len(seed_list)):
+        if u[seed_list[i][0]][seed_list[i][1]] == 0:
+            print(seed_list[i][0], seed_list[i][1])
+            macwe.levelset = circle_levelset(image_bw.shape, (seed_list[i][0], seed_list[i][1]), 4)
+
+            num_iters = 0
+            temp_1_c0 = 0
+            temp_1_c1 = 0
+            temp_2_c0 = 0
+            temp_2_c1 = 0
+            while True:
+                # Evolve.
+                c0, c1, levelset = macwe.step()
+                if temp_1_c0 == c0 and temp_1_c1 == c1:
+                    break
+                if temp_2_c0 == c0 and temp_2_c1 == c1:
+                    break
+                temp_2_c0, temp_2_c1 = temp_1_c0, temp_1_c1
+                temp_1_c0, temp_1_c1 = c0, c1
+                num_iters += 1
+            u = add_levelset(u, levelset)
 
     # Create output and error files
     print("Creating output files...")
-    write_tiff(macwe.levelset, output_path, geo_transform, projection, rows, cols)
+    write_tiff(u, output_path, geo_transform, projection, rows, cols)
 
     """Comment this error line out if no truth mask is provided"""
     error(truth_path, output_path, geo_transform, projection, rows, cols, directory_path)

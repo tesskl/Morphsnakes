@@ -80,40 +80,68 @@ def write_geotiff(fname, data, geo_transform, projection, data_type=gdal.GDT_Byt
 
 
 def extract_seeds(probs):
-    nbr_squares = 64
-    square_size = 8
+    nbr_squares = 16
+    square_size = 32
     seed_list = []
     max_value = 0
-
-
     for m in range(nbr_squares):
         for k in range(nbr_squares):
             next = False
+            max_value = 0
             for i in range(square_size):
                 for j in range(square_size):
                     if not next:
                         counter = 0
+                        #print("m: ", m, "k: ", k, "i: ", i, "j: ", j)
+                        #print("pixel: ", m*square_size + i, k*square_size + j)
                         if probs[m*square_size + i][k*square_size + j] > max_value and probs[m*square_size + i][k*square_size + j] > 0.99:
-                            next = False
                             max_value = probs[m * square_size + i][k * square_size + j]
                             max_pos_x = m * square_size + i
                             max_pos_y = k * square_size + j
                             pixel = [max_pos_x, max_pos_y]
+                            #print(max_pos_x, max_pos_y)
                             for s in range(-1, 2):
                                 for t in range(-1, 2):
                                     x = max_pos_x + s
                                     y = max_pos_y + t
-                                    if (x == -1 or y == -1) or (y == 0 and x == 0):
-                                        print("do")
+                                    if (x == -1 or y == -1) or (y == 0 and x == 0) or (x == 512 or y == 512):
+                                        print("Out of range")
                                     else:
                                         if probs[x][y] > 0.99:
                                             counter += 1
                         if counter >= 3:
                             seed_list.append(pixel)
-                            max_value = 0
+                            #print("seed added")
                             next = True
+
     print(seed_list)
     print(len(seed_list))
+    return seed_list
+
+
+def extract_seeds_squares(probs):
+    print("Extracting seeds...")
+    nbr_squares = 128
+    square_size = 4
+    seed_list = []
+    for m in range(nbr_squares):
+        for k in range(nbr_squares):
+            next = False
+            counter = 0
+            for i in range(square_size):
+                for j in range(square_size):
+                    if not next:
+                        if probs[m*square_size + i][k*square_size + j] > 0.99:
+                            counter += 1
+                        if counter == square_size*square_size:
+                            max_pos_x = int(m * square_size + i - square_size/2)
+                            max_pos_y = int(k * square_size + j - square_size/2)
+                            pixel = [max_pos_x, max_pos_y]
+                            seed_list.append(pixel)
+                            next = True
+                            counter = 0
+                            break
+
     return seed_list
 
 
@@ -122,34 +150,13 @@ def water_probabilities(prob):
     for i in range(512):
         for j in range(512):
             water_probs[i][j] = prob[i * 512 + j][1]
-    return extract_seeds(water_probs)
+    return extract_seeds_squares(water_probs)
 
-
-"""raster_data_path = "fields/image/2298119ene2016recorteTT.tif"
-output_fname = "fields/output_image.tiff"
-train_data_path = "fields/train"
-validation_data_path = "fields/test"
-
-raster_data_path = "island/image/capehorn.tif"
-output_fname = "island/output_image.tiff"
-train_data_path = "island/train"
-validation_data_path = "island/test"""
-
-"""raster_data_path = "landsat_coastline/image/6.tif"
-output_fname = "landsat_coastline/output_image_lr.tiff"
-train_data_path = "landsat_coastline/train"
-#validation_data_path = "landsat_coastline/test"""
-
-"""raster_data_path = "skane_harbour/image/skane_harbour.tif"
-output_fname = "skane_harbour/output_classifier.tiff"
-train_data_path = "skane_harbour/train"
-validation_data_path = "skane_harbour/test"
-# blurred_image_path = "capehorn_landpolygons/image/capehorn_blurred.tif"""
-
-raster_data_path = "skane/image/skane.tif"
-output_fname = "skane/output_classifier.tiff"
-train_data_path = "skane/train"
-validation_data_path = "skane/test"
+directory_path = "69"
+raster_data_path = directory_path + "/image/image.tif"
+output_fname = directory_path + "/output_classifier.tiff"
+train_data_path = directory_path + "/train"
+validation_data_path = directory_path + "/test"
 
 # blurred_image = cv2.GaussianBlur(cv2.imread(raster_data_path),(9,9),0)
 # cv2.imshow('Blurred image', blurred_image)
@@ -185,6 +192,7 @@ training_samples = bands_data[is_train]
 # classifier = LogisticRegression()
 classifier = RandomForestClassifier(n_jobs=4, n_estimators=10)
 classifier.fit(training_samples, training_labels)
+print("Classifying image...")
 
 n_samples = rows * cols
 flat_pixels = bands_data.reshape((n_samples, n_bands))
