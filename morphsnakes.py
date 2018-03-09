@@ -74,7 +74,6 @@ def IS(u):
     for _aux_i, P_i in zip(_aux, P):
         _aux_i[:] = binary_dilation(u, P_i)
 
-    print(_aux.min(0))
     return _aux.min(0)
 
 
@@ -260,36 +259,7 @@ def add_levelset(original_levelset, new_levelset):
                 result[i][j] = 1
     return result
 
-def start_snake():
-    # Load original image
-    directory_path = classify.directory_path
-    img_path = directory_path + "/image/image.tif"
-    img_original = imread(img_path)
-    image_bw = rgb2gray(img_original)
-
-    # Path to truth mask
-    truth_path = directory_path + "/truth_mask.tif"
-
-    # Define path to output
-    output_path = directory_path + "/output_multi.tiff"
-
-    # Save projection, geo transform and shape from original image
-    img_data = gdal.Open(img_path)
-    geo_transform = img_data.GetGeoTransform()
-    projection = img_data.GetProjectionRef()
-    rows, cols = img_original.shape[0], img_original.shape[1]
-
-    seed_list = classify.seed_list
-
-    # Morphological ACWE. Initialization of the level-set.
-    print("Running algorithm...")
-    macwe = MorphACWE(image_bw, smoothing=0, lambda1=1, lambda2=1)
-
-    """Use one or two circles depending on what imaged is used (one or two water masses)"""
-    #macwe.levelset = circle_levelset(image_bw.shape, (100, 100), 50)
-    # macwe.levelset = two_circle_levelset(image_bw.shape, (image_bw.shape[0] / 2, image_bw.shape[1] / 2), 50)
-
-    #macwe.levelset = multi_circle_levelset(image_bw.shape, 8, seed_list)
+def multi_seed_classifier(macwe, seed_list, image_bw):
     u = np.array([[0 for x in range(512)] for y in range(512)])
 
     for i in range(len(seed_list)):
@@ -313,13 +283,68 @@ def start_snake():
                 temp_1_c0, temp_1_c1 = c0, c1
                 num_iters += 1
             u = add_levelset(u, levelset)
+    return u, num_iters
+
+def single_seed(macwe, image_bw):
+    macwe.levelset = circle_levelset(image_bw.shape, (100, 100), 4)
+    num_iters = 0
+    temp_1_c0 = 0
+    temp_1_c1 = 0
+    temp_2_c0 = 0
+    temp_2_c1 = 0
+    while True:
+        # Evolve.
+        c0, c1, levelset = macwe.step()
+        if temp_1_c0 == c0 and temp_1_c1 == c1:
+            break
+        if temp_2_c0 == c0 and temp_2_c1 == c1:
+            break
+        temp_2_c0, temp_2_c1 = temp_1_c0, temp_1_c1
+        temp_1_c0, temp_1_c1 = c0, c1
+        num_iters += 1
+
+    return macwe.levelset, num_iters
+
+def start_snake():
+    # Load original image
+    directory_path = classify.directory_path
+    img_path = directory_path + "/image/image.tif"
+    img_original = imread(img_path)
+    image_bw = rgb2gray(img_original)
+
+    # Path to truth mask
+    truth_path = directory_path + "/truth_mask.tif"
+
+    # Define path to output
+    output_path = directory_path + "/output_multi.tiff"
+
+    # Save projection, geo transform and shape from original image
+    img_data = gdal.Open(img_path)
+    geo_transform = img_data.GetGeoTransform()
+    projection = img_data.GetProjectionRef()
+    rows, cols = img_original.shape[0], img_original.shape[1]
+
+
+
+    # Morphological ACWE. Initialization of the level-set.
+    print("Running algorithm...")
+    macwe = MorphACWE(image_bw, smoothing=1, lambda1=1, lambda2=1)
+
+    """Use one or two circles depending on what imaged is used (one or two water masses)"""
+    #macwe.levelset = circle_levelset(image_bw.shape, (100, 100), 50)
+    # macwe.levelset = two_circle_levelset(image_bw.shape, (image_bw.shape[0] / 2, image_bw.shape[1] / 2), 50)
+
+    #macwe.levelset = multi_circle_levelset(image_bw.shape, 8, seed_list)
+
+    u, num_iters = multi_seed_classifier(macwe, classify.seed_list, image_bw)
+    #u, num_iters = single_seed(macwe, image_bw)
 
     # Create output and error files
     print("Creating output files...")
     write_tiff(u, output_path, geo_transform, projection, rows, cols)
 
     """Comment this error line out if no truth mask is provided"""
-    error(truth_path, output_path, geo_transform, projection, rows, cols, directory_path)
+    #error(truth_path, output_path, geo_transform, projection, rows, cols, directory_path)
 
     return num_iters
 
