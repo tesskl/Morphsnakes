@@ -1,6 +1,5 @@
 import numpy as np
 import os
-import cv2
 from osgeo import gdal
 from matplotlib import pyplot as plt
 from sklearn import svm
@@ -152,7 +151,7 @@ def water_probabilities(prob):
             water_probs[i][j] = prob[i * 512 + j][1]
     return extract_seeds_squares(water_probs)
 
-directory_path = "69"
+directory_path = "68"
 raster_data_path = directory_path + "/image/image.tif"
 output_fname = directory_path + "/output_classifier.tiff"
 train_data_path = directory_path + "/train"
@@ -196,7 +195,10 @@ print("Classifying image...")
 
 n_samples = rows * cols
 flat_pixels = bands_data.reshape((n_samples, n_bands))
+
+
 result = classifier.predict(flat_pixels)
+
 
 prob = classifier.predict_proba(flat_pixels)
 seed_list = water_probabilities(prob)

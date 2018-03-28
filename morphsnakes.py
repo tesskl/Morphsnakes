@@ -7,6 +7,7 @@ from osgeo import gdal
 import time
 from scipy.ndimage import binary_dilation, binary_erosion
 import classify
+from PIL import Image
 
 # COLORS = ["#008000", "#003cb3"]
 COLORS = ["#ffffff", "#000000"]
@@ -162,7 +163,7 @@ def jaccard_similarity(union_nbr_elements, intersection_nbr_elements):
 
 def rgb2gray(img):
     """Convert a RGB image to gray scale."""
-    return 0.2989 * img[:, :, 0] + 0.587 * img[:, :, 1] + 0.114 * img[:, :, 2]
+    return 0.2989 * img[0, :, :] + 0.587 * img[1, :, :] + 0.114 * img[2, :, :]
 
 
 def circle_levelset(shape, center, sqradius):
@@ -251,6 +252,7 @@ def error(truth_path, output_path, geo_transform, projection, rows, cols, direct
 
     jaccard_similarity(union_nbr_elements, intersection_nbr_elements)
 
+
 def add_levelset(original_levelset, new_levelset):
     result = np.array([[0 for x in range(512)] for y in range(512)])
     for i in range(512):
@@ -259,12 +261,13 @@ def add_levelset(original_levelset, new_levelset):
                 result[i][j] = 1
     return result
 
+
 def multi_seed_classifier(macwe, seed_list, image_bw):
     u = np.array([[0 for x in range(512)] for y in range(512)])
 
     for i in range(len(seed_list)):
         if u[seed_list[i][0]][seed_list[i][1]] == 0:
-            print(seed_list[i][0], seed_list[i][1])
+            print("Coordinates", seed_list[i][0], seed_list[i][1])
             macwe.levelset = circle_levelset(image_bw.shape, (seed_list[i][0], seed_list[i][1]), 4)
 
             num_iters = 0
@@ -284,6 +287,7 @@ def multi_seed_classifier(macwe, seed_list, image_bw):
                 num_iters += 1
             u = add_levelset(u, levelset)
     return u, num_iters
+
 
 def single_seed(macwe, image_bw):
     macwe.levelset = circle_levelset(image_bw.shape, (100, 100), 4)
@@ -309,8 +313,14 @@ def start_snake():
     # Load original image
     directory_path = classify.directory_path
     img_path = directory_path + "/image/image.tif"
-    img_original = imread(img_path)
+    #img_original = imread("68.tif")
+
+    img = gdal.Open(img_path)
+    img_original = img.ReadAsArray()
+    #img_original.reshape(512, 512, 3)
+
     image_bw = rgb2gray(img_original)
+
 
     # Path to truth mask
     truth_path = directory_path + "/truth_mask.tif"
@@ -322,7 +332,7 @@ def start_snake():
     img_data = gdal.Open(img_path)
     geo_transform = img_data.GetGeoTransform()
     projection = img_data.GetProjectionRef()
-    rows, cols = img_original.shape[0], img_original.shape[1]
+    rows, cols = img_original.shape[1], img_original.shape[2]
 
 
 
