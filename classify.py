@@ -208,7 +208,7 @@ def predict_test_data(directory, shapefiles):
             prob = loaded_model.predict_proba(flat_pixels)
             list_of_seeds = water_probabilities(prob)
 
-            write_geotiff(("output_" + str(image_nbr[0]) + ".tiff"), classification, geo_transform, projection)
+            #write_geotiff(("output_" + str(image_nbr[0]) + ".tiff"), classification, geo_transform, projection)
 
             verification_pixels = vectors_to_raster(shapefiles, row, col, geo_transform, projection)
             for_verification = np.nonzero(verification_pixels)
@@ -219,37 +219,35 @@ def predict_test_data(directory, shapefiles):
             all_verification_labels = np.concatenate((all_verification_labels, verification_labels))
             all_predicted_labels = np.concatenate((all_predicted_labels, predicted_labels))
 
-    return all_verification_labels, all_predicted_labels
+    return all_verification_labels, all_predicted_labels, list_of_seeds
 
 
 # ----- Train the model -------
 
-directory_path = "67"
+directory_path = "Dataset"
 
-files = [f for f in os.listdir("67/train") if f.endswith('.shp')]
+files = [f for f in os.listdir(directory_path + "/train") if f.endswith('.shp')]
 
 classes = [f.split('.')[0] for f in files]
-shapefiles = [os.path.join("67/train", f)
+shapefiles = [os.path.join(directory_path + "/train", f)
               for f in files if f.endswith('.shp')]
 
-
-
-"""training_labels, training_samples = load_training_data("Dataset/train_images", shapefiles)
+training_labels, training_samples = load_training_data(directory_path + "/train_images", shapefiles)
 
 classifier = RandomForestClassifier(n_jobs=4, n_estimators=10)
 model = classifier.fit(training_samples, training_labels)
 
 filename = 'finalized_model1.sav'
 
-pickle.dump(model, open(filename, 'wb'))"""
+pickle.dump(model, open(filename, 'wb'))
 
 
 # ------- Predict -----------
 
 loaded_model = pickle.load(open('finalized_model1.sav', 'rb'))
-shapefiles_test = [os.path.join("67/test", "%s.shp"%c) for c in classes]
+shapefiles_test = [os.path.join(directory_path+ "/test", "%s.shp"%c) for c in classes]
 
-verification_labels, predicted_labels = predict_test_data("67/image", shapefiles_test)
+verification_labels, predicted_labels, seed_list = predict_test_data(directory_path + "/test_images", shapefiles_test)
 
 
 # -------- Validation --------
