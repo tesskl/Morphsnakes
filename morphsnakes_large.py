@@ -165,14 +165,12 @@ class MorphACWE(object):
         return c0, c1, u
 
 
+
+
 """ Compares similarity between two contours. Returns a value between 0 and 1 (closer to 1 is more similar)."""
-
-
 def jaccard_similarity(union_nbr_elements, intersection_nbr_elements):
     similarity = intersection_nbr_elements / union_nbr_elements
-    print("---------------------------")
-    print("Similarity: ", similarity, " %")
-
+    return similarity
 
 def rgb2gray(img):
     """Convert a RGB image to gray scale."""
@@ -242,11 +240,12 @@ def rasterize(clipped_shapefile, directory_path, geo_transform):
     x_min, x_max, y_min, y_max = source_layer.GetExtent()
 
     # Create the destination data source
-    #x_res = int((x_max - x_min) / pixel_size)
-    #y_res = int((y_max - y_min) / pixel_size)
+    # x_res = int((x_max - x_min) / pixel_size)
+    # y_res = int((y_max - y_min) / pixel_size)
     x_res = 512
     y_res = 512
-    target_ds = gdal.GetDriverByName('GTiff').Create(directory_path + '/truth_mask/truth_mask.tiff', x_res, y_res, 1, gdal.GDT_Byte)
+    target_ds = gdal.GetDriverByName('GTiff').Create(directory_path + '/truth_mask/truth_mask.tiff', x_res, y_res, 1,
+                                                     gdal.GDT_Byte)
     target_ds.SetGeoTransform(geo_transform)
     band = target_ds.GetRasterBand(1)
     band.SetNoDataValue(NoData_value)
@@ -258,7 +257,6 @@ def rasterize(clipped_shapefile, directory_path, geo_transform):
 
 
 def create_truth_mask(raster_mask, directory_path):
-
     # Get extent from raster image
     src = gdal.Open(raster_mask)
     minx, xres, xskew, maxy, yskew, yres = src.GetGeoTransform()
@@ -313,16 +311,9 @@ def create_truth_mask(raster_mask, directory_path):
     rasterize(output_shp, directory_path, src.GetGeoTransform())
 
 
-def error(truth_path, output_path, geo_transform, projection, rows, cols, directory_path):
+def error(truth_mask_array, output_mask_array):
     """ Create image with error area between output and truth masks.
     Prepares matrices for calculation of contour similarity"""
-
-    truth_mask = gdal.Open(truth_path)
-    band = truth_mask.GetRasterBand(1)
-    truth_mask_array = band.ReadAsArray()
-    output_mask = gdal.Open(output_path)
-    #truth_mask_array = np.array(truth_mask.ReadAsArray())
-    output_mask_array = np.array(output_mask.ReadAsArray())
 
     intersection = np.array([[0 for x in range(len(truth_mask_array))] for y in range(len(truth_mask_array))])
     union = np.array([[0 for x in range(len(truth_mask_array))] for y in range(len(truth_mask_array))])
@@ -341,12 +332,8 @@ def error(truth_path, output_path, geo_transform, projection, rows, cols, direct
             if truth_mask_array[j][i] == 0 or output_mask_array[j][i] == 1:
                 union_nbr_elements += 1
                 union[j][i] = 1
-    write_tiff(intersection, directory_path + "/intersection.tiff", geo_transform, projection, rows, cols)
-    write_tiff(union, directory_path + "/union.tiff", geo_transform, projection, rows, cols)
-    write_tiff(result, directory_path + "/error.tiff", geo_transform, projection, rows, cols)
-    print("Calculating similarity...")
 
-    jaccard_similarity(union_nbr_elements, intersection_nbr_elements)
+    return jaccard_similarity(union_nbr_elements, intersection_nbr_elements)
 
 
 def add_levelset(original_levelset, new_levelset):
@@ -407,59 +394,26 @@ def single_seed(macwe, image_bw):
     return macwe.levelset, num_iters
 
 
-def start_snake():
+def start_snake(img_path, validation_label_list, seed_list):
 
-    # Load original image
-    directory_path = classify.directory_path
-    img_path = directory_path + "/image/image.tif"
-    # img_original = imread("68.tif")
+    # Start clock
+    start = time.time()
 
-    # Extract truth mask from OSM shapefile
-    print("Creating truth mask...")
-    create_truth_mask(img_path, directory_path)
-    truth_path = directory_path + "/truth_mask/truth_mask.tiff"
+    # Extract truth mask from validation label list
+    truth_array = []
 
+    # Load image
     img = gdal.Open(img_path)
     img_original = img.ReadAsArray()
-    # img_original.reshape(512, 512, 3)
-
     image_bw = rgb2gray(img_original)
 
-    # Define path to output
-    output_path = directory_path + "/output_multi.tiff"
-
-    # Save projection, geo transform and shape from original image
-    img_data = gdal.Open(img_path)
-    geo_transform = img_data.GetGeoTransform()
-    projection = img_data.GetProjectionRef()
-    rows, cols = img_original.shape[1], img_original.shape[2]
-
     # Morphological ACWE. Initialization of the level-set.
-    print("Running algorithm...")
     macwe = MorphACWE(image_bw, smoothing=0, lambda1=1, lambda2=1)
-
-    """Use one or two circles depending on what imaged is used (one or two water masses)"""
-    # macwe.levelset = circle_levelset(image_bw.shape, (100, 100), 50)
-    # macwe.levelset = two_circle_levelset(image_bw.shape, (image_bw.shape[0] / 2, image_bw.shape[1] / 2), 50)
-
-    # macwe.levelset = multi_circle_levelset(image_bw.shape, 8, seed_list)
-
-    u, num_iters = multi_seed_classifier(macwe, classify.seed_list, image_bw)
-    # u, num_iters = single_seed(macwe, image_bw)
-
-    # Create output and error files
-    print("Creating output files...")
-    write_tiff(u, output_path, geo_transform, projection, rows, cols)
+    output_array, num_iters = multi_seed_classifier(macwe, classify.seed_list, image_bw)
 
     """Comment this error line out if no truth mask is provided"""
-    error(truth_path, output_path, geo_transform, projection, rows, cols, directory_path)
-
-    return num_iters
-
-
-if __name__ == '__main__':
-    start = time.time()
-    num_iters = start_snake()
+    similarity = error(truth_array, output_array)
     end = time.time()
-    print("Number of iterations required: ", num_iters)
-    print("Execution time: ", end - start, " s")
+    execution_time = end - start
+
+    return similarity, execution_time, num_iters
