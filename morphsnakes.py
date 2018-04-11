@@ -7,10 +7,22 @@ from osgeo import gdal
 import time
 from scipy.ndimage import binary_dilation, binary_erosion
 import classify
+import sys
+
+import shapefile
+from osgeo import ogr
+import subprocess
+from osgeo import gdal
+from osgeo import osr
+from osgeo import gdalconst
 from PIL import Image
+import random
+from osgeo import gdal, ogr
+import os
 
 # COLORS = ["#008000", "#003cb3"]
 COLORS = ["#ffffff", "#000000"]
+RASTERIZE_COLOR_FIELD = "__color__"
 
 
 class fcycle(object):
@@ -153,8 +165,9 @@ class MorphACWE(object):
         return c0, c1, u
 
 
-
 """ Compares similarity between two contours. Returns a value between 0 and 1 (closer to 1 is more similar)."""
+
+
 def jaccard_similarity(union_nbr_elements, intersection_nbr_elements):
     similarity = intersection_nbr_elements / union_nbr_elements
     print("---------------------------")
@@ -218,13 +231,97 @@ def write_tiff(data, output_path, geo_transform, projection, rows, cols):
     band.SetColorTable(ct)
 
 
+def rasterize(clipped_shapefile, directory_path, geo_transform):
+    pixel_size = 0.0005
+    NoData_value = 0
+
+    # Open the data source and read in the extent
+    source_ds = ogr.Open(clipped_shapefile)
+    source_layer = source_ds.GetLayer()
+    source_srs = source_layer.GetSpatialRef()
+    x_min, x_max, y_min, y_max = source_layer.GetExtent()
+
+    # Create the destination data source
+    #x_res = int((x_max - x_min) / pixel_size)
+    #y_res = int((y_max - y_min) / pixel_size)
+    x_res = 512
+    y_res = 512
+    target_ds = gdal.GetDriverByName('GTiff').Create(directory_path + '/truth_mask/truth_mask.tiff', x_res, y_res, 1, gdal.GDT_Byte)
+    target_ds.SetGeoTransform(geo_transform)
+    band = target_ds.GetRasterBand(1)
+    band.SetNoDataValue(NoData_value)
+
+    # Rasterize
+    gdal.RasterizeLayer(target_ds, [1], source_layer, burn_values=[255])
+
+    array = band.ReadAsArray()
+
+
+def create_truth_mask(raster_mask, directory_path):
+
+    # Get extent from raster image
+    src = gdal.Open(raster_mask)
+    minx, xres, xskew, maxy, yskew, yres = src.GetGeoTransform()
+    maxx = minx + (src.RasterXSize * xres)
+    miny = maxy + (src.RasterYSize * yres)
+
+    # Create a Polygon from the extent tuple
+    ring = ogr.Geometry(ogr.wkbLinearRing)
+    ring.AddPoint(maxx, miny)
+    ring.AddPoint(minx, miny)
+    ring.AddPoint(minx, maxy)
+    ring.AddPoint(maxx, maxy)
+    ring.AddPoint(maxx, miny)
+    poly = ogr.Geometry(ogr.wkbPolygon)
+    poly.AddGeometry(ring)
+
+    # Save extent to a new Shapefile
+    outShapefile = directory_path + "/truth_mask/polygon_mask.shp"
+    outDriver = ogr.GetDriverByName("ESRI Shapefile")
+
+    # Remove output shapefile if it already exists
+    if os.path.exists(outShapefile):
+        outDriver.DeleteDataSource(outShapefile)
+
+    # Create the output shapefile
+    outDataSource = outDriver.CreateDataSource(outShapefile)
+    outLayer = outDataSource.CreateLayer("states_extent", geom_type=ogr.wkbPolygon)
+
+    # Add an ID field
+    idField = ogr.FieldDefn("id", ogr.OFTInteger)
+    outLayer.CreateField(idField)
+
+    # Create the feature and set values
+    featureDefn = outLayer.GetLayerDefn()
+    feature = ogr.Feature(featureDefn)
+    feature.SetGeometry(poly)
+    feature.SetField("id", 1)
+    outLayer.CreateFeature(feature)
+    feature = None
+
+    # Save and close DataSource
+    inDataSource = None
+    outDataSource = None
+
+    # Crop large shapefile with created polygon
+    clipped_polygon = directory_path + "/truth_mask/polygon_mask.shp"
+    input_shp = "shapefiles/land/land_polygons.shp"
+    output_shp = directory_path + "/truth_mask/clipped_shapefile.shp"
+    subprocess.call(["ogr2ogr", "-clipsrc", clipped_polygon, output_shp, input_shp], shell=True)
+
+    # Rasterize clipped shapefile to truth mask
+    rasterize(output_shp, directory_path, src.GetGeoTransform())
+
+
 def error(truth_path, output_path, geo_transform, projection, rows, cols, directory_path):
     """ Create image with error area between output and truth masks.
     Prepares matrices for calculation of contour similarity"""
 
     truth_mask = gdal.Open(truth_path)
+    band = truth_mask.GetRasterBand(1)
+    truth_mask_array = band.ReadAsArray()
     output_mask = gdal.Open(output_path)
-    truth_mask_array = np.array(truth_mask.ReadAsArray())
+    #truth_mask_array = np.array(truth_mask.ReadAsArray())
     output_mask_array = np.array(output_mask.ReadAsArray())
 
     intersection = np.array([[0 for x in range(len(truth_mask_array))] for y in range(len(truth_mask_array))])
@@ -232,7 +329,6 @@ def error(truth_path, output_path, geo_transform, projection, rows, cols, direct
     intersection_nbr_elements = 0
     union_nbr_elements = 0
     result = np.array([[0 for x in range(len(truth_mask_array))] for y in range(len(truth_mask_array))])
-
     for j in range(len(truth_mask_array)):
         for i in range(len(truth_mask_array)):
             if truth_mask_array[j][i] == 255:
@@ -265,9 +361,10 @@ def add_levelset(original_levelset, new_levelset):
 def multi_seed_classifier(macwe, seed_list, image_bw):
     u = np.array([[0 for x in range(512)] for y in range(512)])
 
+    print("Putting seeds on coordinates:")
     for i in range(len(seed_list)):
         if u[seed_list[i][0]][seed_list[i][1]] == 0:
-            print("Coordinates", seed_list[i][0], seed_list[i][1])
+            print(seed_list[i][0], seed_list[i][1])
             macwe.levelset = circle_levelset(image_bw.shape, (seed_list[i][0], seed_list[i][1]), 4)
 
             num_iters = 0
@@ -309,21 +406,24 @@ def single_seed(macwe, image_bw):
 
     return macwe.levelset, num_iters
 
+
 def start_snake():
+
     # Load original image
     directory_path = classify.directory_path
     img_path = directory_path + "/image/image.tif"
-    #img_original = imread("68.tif")
+    # img_original = imread("68.tif")
+
+    # Extract truth mask from OSM shapefile
+    print("Creating truth mask...")
+    create_truth_mask(img_path, directory_path)
+    truth_path = directory_path + "/truth_mask/truth_mask.tiff"
 
     img = gdal.Open(img_path)
     img_original = img.ReadAsArray()
-    #img_original.reshape(512, 512, 3)
+    # img_original.reshape(512, 512, 3)
 
     image_bw = rgb2gray(img_original)
-
-
-    # Path to truth mask
-    truth_path = directory_path + "/truth_mask.tif"
 
     # Define path to output
     output_path = directory_path + "/output_multi.tiff"
@@ -334,27 +434,25 @@ def start_snake():
     projection = img_data.GetProjectionRef()
     rows, cols = img_original.shape[1], img_original.shape[2]
 
-
-
     # Morphological ACWE. Initialization of the level-set.
     print("Running algorithm...")
-    macwe = MorphACWE(image_bw, smoothing=1, lambda1=1, lambda2=1)
+    macwe = MorphACWE(image_bw, smoothing=0, lambda1=1, lambda2=1)
 
     """Use one or two circles depending on what imaged is used (one or two water masses)"""
-    #macwe.levelset = circle_levelset(image_bw.shape, (100, 100), 50)
+    # macwe.levelset = circle_levelset(image_bw.shape, (100, 100), 50)
     # macwe.levelset = two_circle_levelset(image_bw.shape, (image_bw.shape[0] / 2, image_bw.shape[1] / 2), 50)
 
-    #macwe.levelset = multi_circle_levelset(image_bw.shape, 8, seed_list)
+    # macwe.levelset = multi_circle_levelset(image_bw.shape, 8, seed_list)
 
     u, num_iters = multi_seed_classifier(macwe, classify.seed_list, image_bw)
-    #u, num_iters = single_seed(macwe, image_bw)
+    # u, num_iters = single_seed(macwe, image_bw)
 
     # Create output and error files
     print("Creating output files...")
     write_tiff(u, output_path, geo_transform, projection, rows, cols)
 
     """Comment this error line out if no truth mask is provided"""
-    #error(truth_path, output_path, geo_transform, projection, rows, cols, directory_path)
+    error(truth_path, output_path, geo_transform, projection, rows, cols, directory_path)
 
     return num_iters
 
