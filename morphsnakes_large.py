@@ -6,7 +6,6 @@ import numpy as np
 from osgeo import gdal
 import time
 from scipy.ndimage import binary_dilation, binary_erosion
-import classify
 import sys
 
 import shapefile
@@ -210,12 +209,13 @@ def multi_circle_levelset(shape, sqradius, seed_list):
     return total
 
 
-def write_tiff(data, output_path, geo_transform, projection, rows, cols):
+def write_tiff(data, output_path):
+    rows = 512
+    cols = 512
     # Create output tiff from data
     driver = gdal.GetDriverByName('GTiff')
     dataset = driver.Create(output_path, cols, rows, 1)
-    dataset.SetGeoTransform(geo_transform)
-    dataset.SetProjection(projection)
+
     band = dataset.GetRasterBand(1)
     band.WriteArray(data)
 
@@ -322,8 +322,8 @@ def error(truth_mask_array, output_mask_array):
     result = np.array([[0 for x in range(len(truth_mask_array))] for y in range(len(truth_mask_array))])
     for j in range(len(truth_mask_array)):
         for i in range(len(truth_mask_array)):
-            if truth_mask_array[j][i] == 255:
-                truth_mask_array[j][i] = 1
+            if truth_mask_array[j][i] == 2:
+                truth_mask_array[j][i] = 0
             if truth_mask_array[j][i] != output_mask_array[j][i]:
                 result[j][i] = 1
             if truth_mask_array[j][i] == 0 and output_mask_array[j][i] == 1:
@@ -394,23 +394,23 @@ def single_seed(macwe, image_bw):
     return macwe.levelset, num_iters
 
 
-def start_snake(img_path, validation_label_list, seed_list):
+def start_snake(img, validation_pixel_list, seed_list):
 
     # Start clock
     start = time.time()
 
     # Extract truth mask from validation label list
-    truth_array = []
+    truth_array = validation_pixel_list
 
     # Load image
-    img = gdal.Open(img_path)
+    #img = gdal.Open(img_path)
     img_original = img.ReadAsArray()
     image_bw = rgb2gray(img_original)
 
     # Morphological ACWE. Initialization of the level-set.
     macwe = MorphACWE(image_bw, smoothing=0, lambda1=1, lambda2=1)
-    output_array, num_iters = multi_seed_classifier(macwe, classify.seed_list, image_bw)
-
+    output_array, num_iters = multi_seed_classifier(macwe, seed_list, image_bw)
+    write_tiff(output_array, "output.tiff")
     """Comment this error line out if no truth mask is provided"""
     similarity = error(truth_array, output_array)
     end = time.time()

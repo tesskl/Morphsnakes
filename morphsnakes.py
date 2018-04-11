@@ -6,9 +6,8 @@ import numpy as np
 from osgeo import gdal
 import time
 from scipy.ndimage import binary_dilation, binary_erosion
-import classify
 import sys
-
+import classify
 import shapefile
 from osgeo import ogr
 import subprocess

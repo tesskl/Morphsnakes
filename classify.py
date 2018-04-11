@@ -8,6 +8,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.naive_bayes import GaussianNB
 from sklearn.linear_model import LogisticRegression
 import re
+from morphsnakes_large import start_snake
 
 # A list of "random" colors (for a nicer output)
 COLORS = ["#FF0000", "#09780D", "#2930C1"]
@@ -138,6 +139,13 @@ def extract_seeds_squares(probs):
 
     return seed_list
 
+def get_mean(list):
+    total = 0
+    for item in list:
+        print(item)
+        total = total + item
+    mean = total/len(list)
+    return mean
 
 def water_probabilities(prob):
     water_probs = [[0 for x in range(512)] for y in range(512)]
@@ -183,6 +191,9 @@ def load_training_data(directory, shapefile):
 
 
 def predict_test_data(directory, shapefiles):
+    all_num_iters = []
+    all_execution_time = []
+    all_similarity = []
     all_verification_labels = []
     all_predicted_labels = []
     for image in os.listdir(directory):
@@ -216,23 +227,32 @@ def predict_test_data(directory, shapefiles):
             verification_labels = verification_pixels[for_verification]
             predicted_labels = classification[for_verification]
 
+            similarity, execution_time, num_iters = start_snake(test_image, verification_pixels, list_of_seeds)
+
+            all_execution_time.append(execution_time)
+            all_num_iters.append(num_iters)
+            all_similarity.append(similarity)
             all_verification_labels = np.concatenate((all_verification_labels, verification_labels))
             all_predicted_labels = np.concatenate((all_predicted_labels, predicted_labels))
 
-    return all_verification_labels, all_predicted_labels, list_of_seeds
+    return all_verification_labels, all_predicted_labels, list_of_seeds, all_similarity, all_num_iters, all_execution_time
 
 
 # ----- Train the model -------
 
-directory_path = "Dataset"
 
-files = [f for f in os.listdir(directory_path + "/train") if f.endswith('.shp')]
+
+directory_path = "68"
+
+files = [f for f in os.listdir("Dataset/train") if f.endswith('.shp')]
 
 classes = [f.split('.')[0] for f in files]
-shapefiles = [os.path.join(directory_path + "/train", f)
+shapefiles = [os.path.join("Dataset/train", f)
               for f in files if f.endswith('.shp')]
 
-training_labels, training_samples = load_training_data(directory_path + "/train_images", shapefiles)
+
+training_labels, training_samples = load_training_data("Dataset/train_images", shapefiles)
+
 
 classifier = RandomForestClassifier(n_jobs=4, n_estimators=10)
 model = classifier.fit(training_samples, training_labels)
@@ -245,10 +265,12 @@ pickle.dump(model, open(filename, 'wb'))
 # ------- Predict -----------
 
 loaded_model = pickle.load(open('finalized_model1.sav', 'rb'))
-shapefiles_test = [os.path.join(directory_path+ "/test", "%s.shp"%c) for c in classes]
 
-verification_labels, predicted_labels, seed_list = predict_test_data(directory_path + "/test_images", shapefiles_test)
+shapefiles_test = [os.path.join("Dataset/test", "%s.shp"%c) for c in classes]
 
+
+verification_labels, predicted_labels, seed_list, all_similarity, all_num_iters, all_execution_time = predict_test_data("Dataset/test_images", shapefiles_test)
+print("Mean similarity: ", get_mean(all_similarity))
 
 # -------- Validation --------
 
