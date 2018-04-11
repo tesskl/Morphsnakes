@@ -151,7 +151,7 @@ def water_probabilities(prob):
             water_probs[i][j] = prob[i * 512 + j][1]
     return extract_seeds_squares(water_probs)
 
-directory_path = "68"
+directory_path = "67"
 raster_data_path = directory_path + "/image/image.tif"
 output_fname = directory_path + "/output_classifier.tiff"
 train_data_path = directory_path + "/train"
