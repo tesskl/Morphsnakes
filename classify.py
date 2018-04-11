@@ -1,11 +1,13 @@
 import numpy as np
 import os
 from osgeo import gdal
+import pickle
 from matplotlib import pyplot as plt
-from sklearn import svm
+from sklearn import svm, metrics
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.naive_bayes import GaussianNB
 from sklearn.linear_model import LogisticRegression
+import re
 
 # A list of "random" colors (for a nicer output)
 COLORS = ["#FF0000", "#09780D", "#2930C1"]
@@ -91,14 +93,11 @@ def extract_seeds(probs):
                 for j in range(square_size):
                     if not next:
                         counter = 0
-                        #print("m: ", m, "k: ", k, "i: ", i, "j: ", j)
-                        #print("pixel: ", m*square_size + i, k*square_size + j)
                         if probs[m*square_size + i][k*square_size + j] > max_value and probs[m*square_size + i][k*square_size + j] > 0.99:
                             max_value = probs[m * square_size + i][k * square_size + j]
                             max_pos_x = m * square_size + i
                             max_pos_y = k * square_size + j
                             pixel = [max_pos_x, max_pos_y]
-                            #print(max_pos_x, max_pos_y)
                             for s in range(-1, 2):
                                 for t in range(-1, 2):
                                     x = max_pos_x + s
@@ -110,11 +109,7 @@ def extract_seeds(probs):
                                             counter += 1
                         if counter >= 3:
                             seed_list.append(pixel)
-                            #print("seed added")
                             next = True
-
-    print(seed_list)
-    print(len(seed_list))
     return seed_list
 
 
@@ -151,74 +146,118 @@ def water_probabilities(prob):
             water_probs[i][j] = prob[i * 512 + j][1]
     return extract_seeds_squares(water_probs)
 
-directory_path = "68"
-raster_data_path = directory_path + "/image/image.tif"
-output_fname = directory_path + "/output_classifier.tiff"
-train_data_path = directory_path + "/train"
-validation_data_path = directory_path + "/test"
 
-# blurred_image = cv2.GaussianBlur(cv2.imread(raster_data_path),(9,9),0)
-# cv2.imshow('Blurred image', blurred_image)
-# cv2.imwrite(blurred_image_path, blurred_image)
-raster_dataset = gdal.Open(raster_data_path, gdal.GA_ReadOnly)
+def load_training_data(directory, shapefile):
+    count = 0
+    for image in os.listdir(directory):
+        if image.endswith('.tif'):
+            count += 1
+            print(count)
+            raster_image = gdal.Open(os.path.join(directory, image), gdal.GA_ReadOnly)
+            geo_transform = raster_image.GetGeoTransform()
+            projection = raster_image.GetProjectionRef()
+            bands_d = []
+            for b in range(1, raster_image.RasterCount + 1):
+                band = raster_image.GetRasterBand(b)
+                bands_d.append(band.ReadAsArray())
 
-# extract_grid()
-geo_transform = raster_dataset.GetGeoTransform()
-proj = raster_dataset.GetProjectionRef()
-bands_data = []
-for b in range(1, raster_dataset.RasterCount + 1):
-    band = raster_dataset.GetRasterBand(b)
-    bands_data.append(band.ReadAsArray())
+            bands_d = np.dstack(bands_d)
+            rows, cols, bands = bands_d.shape
+            labeled_pixels = vectors_to_raster(shapefile, rows, cols, geo_transform, projection)
+            is_train = np.nonzero(labeled_pixels)
+            training_l = labeled_pixels[is_train]
+            training_s = bands_d[is_train]
 
-bands_data = np.dstack(bands_data)
-rows, cols, n_bands = bands_data.shape
-files = [f for f in os.listdir(train_data_path) if f.endswith('.shp')]
+            if count == 2:
+                training_l_result = np.concatenate((training_l, prev_l))
+                training_s_result = np.concatenate((training_s, prev_s))
+
+            if count >= 3:
+                training_l_result = np.concatenate((training_l, training_l_result))
+                training_s_result = np.concatenate((training_s, training_s_result))
+
+            prev_l = training_l
+            prev_s = training_s
+
+    return training_l_result, training_s_result
+
+
+def predict_test_data(directory, shapefiles):
+    all_verification_labels = []
+    all_predicted_labels = []
+    for image in os.listdir(directory):
+        if image.endswith('.tif'):
+            image_nbr = image.split(".")
+            test_image = gdal.Open(os.path.join(directory, image), gdal.GA_ReadOnly)
+            geo_transform = test_image.GetGeoTransform()
+            projection = test_image.GetProjectionRef()
+            test_image_data = []
+            for b in range(1, test_image.RasterCount + 1):
+                band = test_image.GetRasterBand(b)
+                test_image_data.append(band.ReadAsArray())
+            test_image_data = np.dstack(test_image_data)
+
+            row, col, n_band = test_image_data.shape
+
+            n_samples = row * col
+            flat_pixels = test_image_data.reshape((n_samples, n_band))
+
+            result = loaded_model.predict(flat_pixels)
+            classification = result.reshape((row, col))
+
+            prob = loaded_model.predict_proba(flat_pixels)
+            list_of_seeds = water_probabilities(prob)
+
+            write_geotiff(("output_" + str(image_nbr[0]) + ".tiff"), classification, geo_transform, projection)
+
+            verification_pixels = vectors_to_raster(shapefiles, row, col, geo_transform, projection)
+            for_verification = np.nonzero(verification_pixels)
+
+            verification_labels = verification_pixels[for_verification]
+            predicted_labels = classification[for_verification]
+
+            all_verification_labels = np.concatenate((all_verification_labels, verification_labels))
+            all_predicted_labels = np.concatenate((all_predicted_labels, predicted_labels))
+
+    return all_verification_labels, all_predicted_labels
+
+
+# ----- Train the model -------
+
+directory_path = "67"
+
+files = [f for f in os.listdir("67/train") if f.endswith('.shp')]
 classes = [f.split('.')[0] for f in files]
-shapefiles = [os.path.join(train_data_path, f)
+shapefiles = [os.path.join("67/train", f)
               for f in files if f.endswith('.shp')]
 
-labeled_pixels = vectors_to_raster(shapefiles, rows, cols, geo_transform, proj)
-is_train = np.nonzero(labeled_pixels)
-training_labels = labeled_pixels[is_train]
-training_samples = bands_data[is_train]
-"""classifier = svm.SVC(C=1.0, cache_size=200, class_weight=None, coef0=0.0,
-    decision_function_shape='ovr', degree=3, gamma='auto', kernel='rbf',
-    max_iter=-1, probability=False, random_state=None, shrinking=True,
-    tol=0.001, verbose=False)"""
-# classifier = svm.SVC(C=1, kernel='linear', probability=True)
-# classifier = GaussianNB()
-# classifier = MLPClassifier(alpha=1)
-# classifier = LogisticRegression()
+
+
+"""training_labels, training_samples = load_training_data("Dataset/train_images", shapefiles)
+
 classifier = RandomForestClassifier(n_jobs=4, n_estimators=10)
-classifier.fit(training_samples, training_labels)
-print("Classifying image...")
+model = classifier.fit(training_samples, training_labels)
 
-n_samples = rows * cols
-flat_pixels = bands_data.reshape((n_samples, n_bands))
+filename = 'finalized_model1.sav'
 
-
-result = classifier.predict(flat_pixels)
+pickle.dump(model, open(filename, 'wb'))"""
 
 
-prob = classifier.predict_proba(flat_pixels)
-seed_list = water_probabilities(prob)
-classification = result.reshape((rows, cols))
-write_geotiff(output_fname, classification, geo_transform, proj)
+# ------- Predict -----------
 
-# ----------Validation----------
+loaded_model = pickle.load(open('finalized_model1.sav', 'rb'))
+shapefiles_test = [os.path.join("67/test", "%s.shp"%c) for c in classes]
 
-"""shapefiles = [os.path.join(validation_data_path, "%s.shp"%c) for c in classes]
-print(shapefiles)
-verification_pixels = vectors_to_raster(shapefiles, rows, cols, geo_transform, proj)
-for_verification = np.nonzero(verification_pixels)
-verification_labels = verification_pixels[for_verification]
-predicted_labels = classification[for_verification]
+verification_labels, predicted_labels = predict_test_data("67/image", shapefiles_test)
 
-print("Confussion matrix:\n%s" %
+
+# -------- Validation --------
+
+print("Confusion matrix:\n%s" %
       metrics.confusion_matrix(verification_labels, predicted_labels))
 target_names = ['Class %s' % s for s in classes]
 print("Classification report:\n%s" %
       metrics.classification_report(verification_labels, predicted_labels,
                                     target_names=target_names))
 print("Classification accuracy: %f" %
-      metrics.accuracy_score(verification_labels, predicted_labels))"""
+      metrics.accuracy_score(verification_labels, predicted_labels))
