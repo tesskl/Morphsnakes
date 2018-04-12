@@ -8,7 +8,6 @@ import time
 from scipy.ndimage import binary_dilation, binary_erosion
 import sys
 
-import shapefile
 from osgeo import ogr
 import subprocess
 from osgeo import gdal
@@ -164,12 +163,11 @@ class MorphACWE(object):
         return c0, c1, u
 
 
-
-
-""" Compares similarity between two contours. Returns a value between 0 and 1 (closer to 1 is more similar)."""
 def jaccard_similarity(union_nbr_elements, intersection_nbr_elements):
+    """ Compares similarity between two contours. Returns a value between 0 and 1 (closer to 1 is more similar)."""
     similarity = intersection_nbr_elements / union_nbr_elements
     return similarity
+
 
 def rgb2gray(img):
     """Convert a RGB image to gray scale."""
@@ -182,31 +180,6 @@ def circle_levelset(shape, center, sqradius):
     phi = sqradius - np.sqrt(np.sum(grid.T ** 2, 0))
     u = np.float_(phi > 0)
     return u
-
-
-def two_circle_levelset(shape, center, sqradius):
-    """Build a binary function with a circle as the 0.5-levelset."""
-    grid2 = np.mgrid[list(map(slice, shape))].T - (10, 10)
-    phi2 = 10 - np.sqrt(np.sum(grid2.T ** 2, 0))
-    u2 = np.float_(phi2 > 0)
-
-    grid = np.mgrid[list(map(slice, shape))].T - center
-    phi = sqradius - np.sqrt(np.sum(grid.T ** 2, 0))
-    u = np.float_(phi > 0)
-
-    total = u + u2
-    return total
-
-
-def multi_circle_levelset(shape, sqradius, seed_list):
-    """Build a binary function with a circle as the 0.5-levelset."""
-    total = 0
-    for i in range(len(seed_list)):
-        grid = np.mgrid[list(map(slice, shape))].T - (seed_list[i][0], seed_list[i][1])
-        phi = sqradius - np.sqrt(np.sum(grid.T ** 2, 0))
-        u = np.float_(phi > 0)
-        total = total + u
-    return total
 
 
 def write_tiff(data, output_path):
@@ -227,88 +200,6 @@ def write_tiff(data, output_path):
         b = int(color_hex[5:7], 16)
         ct.SetColorEntry(pixel_value, (r, g, b, 255))
     band.SetColorTable(ct)
-
-
-def rasterize(clipped_shapefile, directory_path, geo_transform):
-    pixel_size = 0.0005
-    NoData_value = 0
-
-    # Open the data source and read in the extent
-    source_ds = ogr.Open(clipped_shapefile)
-    source_layer = source_ds.GetLayer()
-    source_srs = source_layer.GetSpatialRef()
-    x_min, x_max, y_min, y_max = source_layer.GetExtent()
-
-    # Create the destination data source
-    # x_res = int((x_max - x_min) / pixel_size)
-    # y_res = int((y_max - y_min) / pixel_size)
-    x_res = 512
-    y_res = 512
-    target_ds = gdal.GetDriverByName('GTiff').Create(directory_path + '/truth_mask/truth_mask.tiff', x_res, y_res, 1,
-                                                     gdal.GDT_Byte)
-    target_ds.SetGeoTransform(geo_transform)
-    band = target_ds.GetRasterBand(1)
-    band.SetNoDataValue(NoData_value)
-
-    # Rasterize
-    gdal.RasterizeLayer(target_ds, [1], source_layer, burn_values=[255])
-
-    truth_array = band.ReadAsArray()
-
-
-def create_truth_mask(raster_mask, directory_path):
-    # Get extent from raster image
-    src = gdal.Open(raster_mask)
-    minx, xres, xskew, maxy, yskew, yres = src.GetGeoTransform()
-    maxx = minx + (src.RasterXSize * xres)
-    miny = maxy + (src.RasterYSize * yres)
-
-    # Create a Polygon from the extent tuple
-    ring = ogr.Geometry(ogr.wkbLinearRing)
-    ring.AddPoint(maxx, miny)
-    ring.AddPoint(minx, miny)
-    ring.AddPoint(minx, maxy)
-    ring.AddPoint(maxx, maxy)
-    ring.AddPoint(maxx, miny)
-    poly = ogr.Geometry(ogr.wkbPolygon)
-    poly.AddGeometry(ring)
-
-    # Save extent to a new Shapefile
-    outShapefile = directory_path + "/truth_mask/polygon_mask.shp"
-    outDriver = ogr.GetDriverByName("ESRI Shapefile")
-
-    # Remove output shapefile if it already exists
-    if os.path.exists(outShapefile):
-        outDriver.DeleteDataSource(outShapefile)
-
-    # Create the output shapefile
-    outDataSource = outDriver.CreateDataSource(outShapefile)
-    outLayer = outDataSource.CreateLayer("states_extent", geom_type=ogr.wkbPolygon)
-
-    # Add an ID field
-    idField = ogr.FieldDefn("id", ogr.OFTInteger)
-    outLayer.CreateField(idField)
-
-    # Create the feature and set values
-    featureDefn = outLayer.GetLayerDefn()
-    feature = ogr.Feature(featureDefn)
-    feature.SetGeometry(poly)
-    feature.SetField("id", 1)
-    outLayer.CreateFeature(feature)
-    feature = None
-
-    # Save and close DataSource
-    inDataSource = None
-    outDataSource = None
-
-    # Crop large shapefile with created polygon
-    clipped_polygon = directory_path + "/truth_mask/polygon_mask.shp"
-    input_shp = "shapefiles/land/land_polygons.shp"
-    output_shp = directory_path + "/truth_mask/clipped_shapefile.shp"
-    subprocess.call(["ogr2ogr", "-clipsrc", clipped_polygon, output_shp, input_shp], shell=True)
-
-    # Rasterize clipped shapefile to truth mask
-    rasterize(output_shp, directory_path, src.GetGeoTransform())
 
 
 def error(truth_mask_array, output_mask_array):
@@ -353,7 +244,6 @@ def multi_seed_classifier(macwe, seed_list, image_bw):
         if u[seed_list[i][0]][seed_list[i][1]] == 0:
             print(seed_list[i][0], seed_list[i][1])
             macwe.levelset = circle_levelset(image_bw.shape, (seed_list[i][0], seed_list[i][1]), 4)
-
             num_iters = 0
             temp_1_c0 = 0
             temp_1_c1 = 0
@@ -373,28 +263,7 @@ def multi_seed_classifier(macwe, seed_list, image_bw):
     return u, num_iters
 
 
-def single_seed(macwe, image_bw):
-    macwe.levelset = circle_levelset(image_bw.shape, (100, 100), 4)
-    num_iters = 0
-    temp_1_c0 = 0
-    temp_1_c1 = 0
-    temp_2_c0 = 0
-    temp_2_c1 = 0
-    while True:
-        # Evolve.
-        c0, c1, levelset = macwe.step()
-        if temp_1_c0 == c0 and temp_1_c1 == c1:
-            break
-        if temp_2_c0 == c0 and temp_2_c1 == c1:
-            break
-        temp_2_c0, temp_2_c1 = temp_1_c0, temp_1_c1
-        temp_1_c0, temp_1_c1 = c0, c1
-        num_iters += 1
-
-    return macwe.levelset, num_iters
-
-
-def start_snake(img, validation_pixel_list, seed_list):
+def start_snake(img, img_nbr, validation_pixel_list, seed_list):
 
     # Start clock
     start = time.time()
@@ -410,7 +279,8 @@ def start_snake(img, validation_pixel_list, seed_list):
     # Morphological ACWE. Initialization of the level-set.
     macwe = MorphACWE(image_bw, smoothing=0, lambda1=1, lambda2=1)
     output_array, num_iters = multi_seed_classifier(macwe, seed_list, image_bw)
-    write_tiff(output_array, "output.tiff")
+
+    write_tiff(output_array, img_nbr + "_snake_output.tiff")
     """Comment this error line out if no truth mask is provided"""
     similarity = error(truth_array, output_array)
     end = time.time()

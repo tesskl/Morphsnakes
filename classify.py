@@ -17,6 +17,7 @@ COLORS = ["#FF0000", "#09780D", "#2930C1"]
 def create_mask_from_vector(vector_data_path, cols, rows, geo_transform,
                             projection, target_value=1):
     """Rasterize the given vector (wrapper for gdal.RasterizeLayer)."""
+    print(target_value)
     data_source = gdal.OpenEx(vector_data_path, gdal.OF_VECTOR)
     layer = data_source.GetLayer(0)
     driver = gdal.GetDriverByName('MEM')  # In memory dataset
@@ -116,8 +117,8 @@ def extract_seeds(probs):
 
 def extract_seeds_squares(probs):
     print("Extracting seeds...")
-    nbr_squares = 128
-    square_size = 4
+    nbr_squares = 64
+    square_size = 8
     seed_list = []
     for m in range(nbr_squares):
         for k in range(nbr_squares):
@@ -136,8 +137,8 @@ def extract_seeds_squares(probs):
                             next = True
                             counter = 0
                             break
-
     return seed_list
+
 
 def get_mean(list):
     total = 0
@@ -146,6 +147,7 @@ def get_mean(list):
         total = total + item
     mean = total/len(list)
     return mean
+
 
 def water_probabilities(prob):
     water_probs = [[0 for x in range(512)] for y in range(512)]
@@ -198,6 +200,7 @@ def predict_test_data(directory, shapefiles):
     all_predicted_labels = []
     for image in os.listdir(directory):
         if image.endswith('.tif'):
+            print("Image: ", image)
             image_nbr = image.split(".")
             test_image = gdal.Open(os.path.join(directory, image), gdal.GA_ReadOnly)
             geo_transform = test_image.GetGeoTransform()
@@ -227,11 +230,12 @@ def predict_test_data(directory, shapefiles):
             verification_labels = verification_pixels[for_verification]
             predicted_labels = classification[for_verification]
 
-            similarity, execution_time, num_iters = start_snake(test_image, verification_pixels, list_of_seeds)
+            if len(list_of_seeds) > 0:
+                similarity, execution_time, num_iters = start_snake(test_image, str(image_nbr[0]), verification_pixels, list_of_seeds)
+                all_execution_time.append(execution_time)
+                all_num_iters.append(num_iters)
+                all_similarity.append(similarity)
 
-            all_execution_time.append(execution_time)
-            all_num_iters.append(num_iters)
-            all_similarity.append(similarity)
             all_verification_labels = np.concatenate((all_verification_labels, verification_labels))
             all_predicted_labels = np.concatenate((all_predicted_labels, predicted_labels))
 
@@ -239,8 +243,6 @@ def predict_test_data(directory, shapefiles):
 
 
 # ----- Train the model -------
-
-
 
 directory_path = "68"
 
@@ -250,9 +252,7 @@ classes = [f.split('.')[0] for f in files]
 shapefiles = [os.path.join("Dataset/train", f)
               for f in files if f.endswith('.shp')]
 
-
 training_labels, training_samples = load_training_data("Dataset/train_images", shapefiles)
-
 
 classifier = RandomForestClassifier(n_jobs=4, n_estimators=10)
 model = classifier.fit(training_samples, training_labels)
@@ -268,11 +268,11 @@ loaded_model = pickle.load(open('finalized_model1.sav', 'rb'))
 
 shapefiles_test = [os.path.join("Dataset/test", "%s.shp"%c) for c in classes]
 
-
 verification_labels, predicted_labels, seed_list, all_similarity, all_num_iters, all_execution_time = predict_test_data("Dataset/test_images", shapefiles_test)
-print("Mean similarity: ", get_mean(all_similarity))
 
 # -------- Validation --------
+
+print("Mean similarity: ", get_mean(all_similarity))
 
 print("Confusion matrix:\n%s" %
       metrics.confusion_matrix(verification_labels, predicted_labels))
