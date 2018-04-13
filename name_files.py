@@ -14,6 +14,6 @@ def mix(input_path, output_path):
 
 
 input_path = "C:/Users/therese/Google Drive/Kartdata"
-output_path = "C:/Users/therese/Google Drive/Kartdata_utan_mappar"
+output_path = "C:/Users/therese/Google Drive/Kartdata_set"
 
 mix(input_path, output_path)

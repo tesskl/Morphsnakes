@@ -1,22 +1,10 @@
 # -*- coding: utf-8 -*-
 
 from itertools import cycle
-from matplotlib.image import imread
 import numpy as np
-from osgeo import gdal
 import time
 from scipy.ndimage import binary_dilation, binary_erosion
-import sys
-
-from osgeo import ogr
-import subprocess
 from osgeo import gdal
-from osgeo import osr
-from osgeo import gdalconst
-from PIL import Image
-import random
-from osgeo import gdal, ogr
-import os
 
 # COLORS = ["#008000", "#003cb3"]
 COLORS = ["#ffffff", "#000000"]

@@ -17,7 +17,6 @@ COLORS = ["#FF0000", "#09780D", "#2930C1"]
 def create_mask_from_vector(vector_data_path, cols, rows, geo_transform,
                             projection, target_value=1):
     """Rasterize the given vector (wrapper for gdal.RasterizeLayer)."""
-    print(target_value)
     data_source = gdal.OpenEx(vector_data_path, gdal.OF_VECTOR)
     layer = data_source.GetLayer(0)
     driver = gdal.GetDriverByName('MEM')  # In memory dataset
@@ -148,6 +147,32 @@ def get_mean(list):
     mean = total/len(list)
     return mean
 
+def get_seeds_from_osm(verification_pixels):
+    print("Extracting seeds...")
+    nbr_squares = 32
+    square_size = 16
+    seed_list = []
+    for m in range(nbr_squares):
+        for k in range(nbr_squares):
+            next = False
+            counter = 0
+            for i in range(square_size):
+                for j in range(square_size):
+                    if not next:
+                        x = m * square_size + i
+                        y = k * square_size + j
+                        if verification_pixels[x][y] == 2:
+                            counter += 1
+                        if counter == square_size * square_size:
+                            x_pos = int(x - square_size / 2)
+                            y_pos = int(y - square_size / 2)
+                            pixel = [x_pos, y_pos]
+                            seed_list.append(pixel)
+                            next = True
+                            counter = 0
+                            break
+    return seed_list
+
 
 def water_probabilities(prob):
     water_probs = [[0 for x in range(512)] for y in range(512)]
@@ -162,7 +187,6 @@ def load_training_data(directory, shapefile):
     for image in os.listdir(directory):
         if image.endswith('.tif'):
             count += 1
-            print(count)
             raster_image = gdal.Open(os.path.join(directory, image), gdal.GA_ReadOnly)
             geo_transform = raster_image.GetGeoTransform()
             projection = raster_image.GetProjectionRef()
@@ -206,7 +230,8 @@ def predict_test_data(directory, shapefiles):
             geo_transform = test_image.GetGeoTransform()
             projection = test_image.GetProjectionRef()
             test_image_data = []
-            for b in range(1, test_image.RasterCount + 1):
+
+            for b in range(1, test_image.RasterCount):
                 band = test_image.GetRasterBand(b)
                 test_image_data.append(band.ReadAsArray())
             test_image_data = np.dstack(test_image_data)
@@ -219,13 +244,16 @@ def predict_test_data(directory, shapefiles):
             result = loaded_model.predict(flat_pixels)
             classification = result.reshape((row, col))
 
-            prob = loaded_model.predict_proba(flat_pixels)
-            list_of_seeds = water_probabilities(prob)
-
             #write_geotiff(("output_" + str(image_nbr[0]) + ".tiff"), classification, geo_transform, projection)
 
             verification_pixels = vectors_to_raster(shapefiles, row, col, geo_transform, projection)
             for_verification = np.nonzero(verification_pixels)
+
+            """Extract seed list from classifier"""
+            #prob = loaded_model.predict_proba(flat_pixels)
+            #list_of_seeds = water_probabilities(prob)
+            """Extract seed list from osm truth"""
+            list_of_seeds = get_seeds_from_osm(verification_pixels)
 
             verification_labels = verification_pixels[for_verification]
             predicted_labels = classification[for_verification]
@@ -251,7 +279,7 @@ files = [f for f in os.listdir("Dataset/train") if f.endswith('.shp')]
 classes = [f.split('.')[0] for f in files]
 shapefiles = [os.path.join("Dataset/train", f)
               for f in files if f.endswith('.shp')]
-
+""""
 training_labels, training_samples = load_training_data("Dataset/train_images", shapefiles)
 
 classifier = RandomForestClassifier(n_jobs=4, n_estimators=10)
@@ -260,6 +288,7 @@ model = classifier.fit(training_samples, training_labels)
 filename = 'finalized_model1.sav'
 
 pickle.dump(model, open(filename, 'wb'))
+"""
 
 
 # ------- Predict -----------
