@@ -226,7 +226,6 @@ def add_levelset(original_levelset, new_levelset):
 
 def multi_seed_classifier(macwe, seed_list, image_bw):
     u = np.array([[0 for x in range(512)] for y in range(512)])
-
     print("Putting seeds on coordinates:")
     for i in range(len(seed_list)):
         if u[seed_list[i][0]][seed_list[i][1]] == 0:
@@ -268,8 +267,10 @@ def start_snake(img, img_nbr, validation_pixel_list, seed_list):
     macwe = MorphACWE(image_bw, smoothing=0, lambda1=1, lambda2=1)
     output_array, num_iters = multi_seed_classifier(macwe, seed_list, image_bw)
 
+
+    """Comment this line out if no output image is needed"""
     write_tiff(output_array, img_nbr + "_snake_output.tiff")
-    """Comment this error line out if no truth mask is provided"""
+
     similarity = error(truth_array, output_array)
     end = time.time()
     execution_time = end - start
