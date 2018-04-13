@@ -17,7 +17,6 @@ COLORS = ["#FF0000", "#09780D", "#2930C1"]
 def create_mask_from_vector(vector_data_path, cols, rows, geo_transform,
                             projection, target_value=1):
     """Rasterize the given vector (wrapper for gdal.RasterizeLayer)."""
-    print(target_value)
     data_source = gdal.OpenEx(vector_data_path, gdal.OF_VECTOR)
     layer = data_source.GetLayer(0)
     driver = gdal.GetDriverByName('MEM')  # In memory dataset
@@ -127,7 +126,7 @@ def extract_seeds_squares(probs):
             for i in range(square_size):
                 for j in range(square_size):
                     if not next:
-                        if probs[m*square_size + i][k*square_size + j] > 0.99:
+                        if probs[m*square_size + i][k*square_size + j] > 0.6:
                             counter += 1
                         if counter == square_size*square_size:
                             max_pos_x = int(m * square_size + i - square_size/2)
@@ -149,6 +148,12 @@ def get_mean(list):
     return mean
 
 
+def get_median(list):
+    list.sort()
+    median = int(len(list)/2)
+    return list[median]
+
+
 def water_probabilities(prob):
     water_probs = [[0 for x in range(512)] for y in range(512)]
     for i in range(512):
@@ -162,12 +167,12 @@ def load_training_data(directory, shapefile):
     for image in os.listdir(directory):
         if image.endswith('.tif'):
             count += 1
-            print(count)
+            print(image)
             raster_image = gdal.Open(os.path.join(directory, image), gdal.GA_ReadOnly)
             geo_transform = raster_image.GetGeoTransform()
             projection = raster_image.GetProjectionRef()
             bands_d = []
-            for b in range(1, raster_image.RasterCount + 1):
+            for b in range(1, raster_image.RasterCount):
                 band = raster_image.GetRasterBand(b)
                 bands_d.append(band.ReadAsArray())
 
@@ -206,7 +211,7 @@ def predict_test_data(directory, shapefiles):
             geo_transform = test_image.GetGeoTransform()
             projection = test_image.GetProjectionRef()
             test_image_data = []
-            for b in range(1, test_image.RasterCount + 1):
+            for b in range(1, test_image.RasterCount):
                 band = test_image.GetRasterBand(b)
                 test_image_data.append(band.ReadAsArray())
             test_image_data = np.dstack(test_image_data)
@@ -222,7 +227,8 @@ def predict_test_data(directory, shapefiles):
             prob = loaded_model.predict_proba(flat_pixels)
             list_of_seeds = water_probabilities(prob)
 
-            #write_geotiff(("output_" + str(image_nbr[0]) + ".tiff"), classification, geo_transform, projection)
+            """Comment this line out if no output image is needed"""
+            write_geotiff(("output_" + str(image_nbr[0]) + ".tiff"), classification, geo_transform, projection)
 
             verification_pixels = vectors_to_raster(shapefiles, row, col, geo_transform, projection)
             for_verification = np.nonzero(verification_pixels)
@@ -242,37 +248,41 @@ def predict_test_data(directory, shapefiles):
     return all_verification_labels, all_predicted_labels, list_of_seeds, all_similarity, all_num_iters, all_execution_time
 
 
-# ----- Train the model -------
-
-directory_path = "68"
-
 files = [f for f in os.listdir("Dataset/train") if f.endswith('.shp')]
 
 classes = [f.split('.')[0] for f in files]
 shapefiles = [os.path.join("Dataset/train", f)
               for f in files if f.endswith('.shp')]
 
-training_labels, training_samples = load_training_data("Dataset/train_images", shapefiles)
+
+# ----- Train the model -------
+
+"""training_labels, training_samples = load_training_data("set", shapefiles)
 
 classifier = RandomForestClassifier(n_jobs=4, n_estimators=10)
 model = classifier.fit(training_samples, training_labels)
 
-filename = 'finalized_model1.sav'
+filename = 'small_model_3bands.sav'
 
-pickle.dump(model, open(filename, 'wb'))
+pickle.dump(model, open(filename, 'wb'))"""
+
 
 
 # ------- Predict -----------
 
-loaded_model = pickle.load(open('finalized_model1.sav', 'rb'))
+loaded_model = pickle.load(open('small_model_3bands.sav', 'rb'))
 
 shapefiles_test = [os.path.join("Dataset/test", "%s.shp"%c) for c in classes]
 
 verification_labels, predicted_labels, seed_list, all_similarity, all_num_iters, all_execution_time = predict_test_data("Dataset/test_images", shapefiles_test)
 
+
+
 # -------- Validation --------
 
 print("Mean similarity: ", get_mean(all_similarity))
+
+print("Median: ", get_median(all_similarity))
 
 print("Confusion matrix:\n%s" %
       metrics.confusion_matrix(verification_labels, predicted_labels))
