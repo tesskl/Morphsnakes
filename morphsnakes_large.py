@@ -5,6 +5,7 @@ import numpy as np
 import time
 from scipy.ndimage import binary_dilation, binary_erosion
 from osgeo import gdal
+import os
 
 # COLORS = ["#008000", "#003cb3"]
 COLORS = ["#ffffff", "#000000"]
@@ -151,12 +152,6 @@ class MorphACWE(object):
         return c0, c1, u
 
 
-def jaccard_similarity(union_nbr_elements, intersection_nbr_elements):
-    """ Compares similarity between two contours. Returns a value between 0 and 1 (closer to 1 is more similar)."""
-    similarity = intersection_nbr_elements / union_nbr_elements
-    return similarity
-
-
 def rgb2gray(img):
     """Convert a RGB image to gray scale."""
     return 0.2989 * img[0, :, :] + 0.587 * img[1, :, :] + 0.114 * img[2, :, :]
@@ -168,6 +163,94 @@ def circle_levelset(shape, center, sqradius):
     phi = sqradius - np.sqrt(np.sum(grid.T ** 2, 0))
     u = np.float_(phi > 0)
     return u
+
+
+def add_levelset(original_levelset, new_levelset):
+    result = np.array([[0 for x in range(512)] for y in range(512)])
+    for i in range(512):
+        for j in range(512):
+            if original_levelset[i][j] == 1 or new_levelset[i][j] == 1:
+                result[i][j] = 1
+    return result
+
+
+def create_mask_from_vector(vector_data_path, cols, rows, geo_transform,
+                            projection, target_value=1):
+    """Rasterize the given vector (wrapper for gdal.RasterizeLayer)."""
+    data_source = gdal.OpenEx(vector_data_path, gdal.OF_VECTOR)
+    layer = data_source.GetLayer(0)
+    driver = gdal.GetDriverByName('MEM')  # In memory dataset
+    target_ds = driver.Create('', cols, rows, 1, gdal.GDT_UInt16)
+    target_ds.SetGeoTransform(geo_transform)
+    target_ds.SetProjection(projection)
+    gdal.RasterizeLayer(target_ds, [1], layer, burn_values=[target_value])
+    return target_ds
+
+
+def vectors_to_raster(file_paths, rows, cols, geo_transform, projection):
+    """Rasterize all the vectors in the given directory into a single image."""
+    labeled_pixels = np.zeros((rows, cols))
+    for i, path in enumerate(file_paths):
+        label = i + 1
+        ds = create_mask_from_vector(path, cols, rows, geo_transform,
+                                     projection, target_value=label)
+        band = ds.GetRasterBand(1)
+        labeled_pixels += band.ReadAsArray()
+        ds = None
+    return labeled_pixels
+
+
+def multi_seed(macwe, seed_list, image_bw):
+    u = np.array([[0 for x in range(512)] for y in range(512)])
+    print("Putting seeds on coordinates:")
+    for i in range(len(seed_list)):
+        if u[seed_list[i][0]][seed_list[i][1]] == 0:
+            print(seed_list[i][0], seed_list[i][1])
+            macwe.levelset = circle_levelset(image_bw.shape, (seed_list[i][0], seed_list[i][1]), 4)
+            num_iters = 0
+            temp_1_c0 = 0
+            temp_1_c1 = 0
+            temp_2_c0 = 0
+            temp_2_c1 = 0
+            while True:
+                # Evolve.
+                c0, c1, levelset = macwe.step()
+                if temp_1_c0 == c0 and temp_1_c1 == c1:
+                    break
+                if temp_2_c0 == c0 and temp_2_c1 == c1:
+                    break
+                temp_2_c0, temp_2_c1 = temp_1_c0, temp_1_c1
+                temp_1_c0, temp_1_c1 = c0, c1
+                num_iters += 1
+            u = add_levelset(u, levelset)
+    return u, num_iters
+
+
+def get_seeds_from_osm(verification_pixels):
+    print("Extracting seeds...")
+    nbr_squares = 32
+    square_size = 16
+    seed_list = []
+    for m in range(nbr_squares):
+        for k in range(nbr_squares):
+            next = False
+            counter = 0
+            for i in range(square_size):
+                for j in range(square_size):
+                    if not next:
+                        x = m * square_size + i
+                        y = k * square_size + j
+                        if verification_pixels[x][y] == 2:
+                            counter += 1
+                        if counter == square_size * square_size:
+                            x_pos = int(x - square_size / 2)
+                            y_pos = int(y - square_size / 2)
+                            pixel = [x_pos, y_pos]
+                            seed_list.append(pixel)
+                            next = True
+                            counter = 0
+                            break
+    return seed_list
 
 
 def write_tiff(data, output_path):
@@ -215,39 +298,31 @@ def error(truth_mask_array, output_mask_array):
     return jaccard_similarity(union_nbr_elements, intersection_nbr_elements)
 
 
-def add_levelset(original_levelset, new_levelset):
-    result = np.array([[0 for x in range(512)] for y in range(512)])
-    for i in range(512):
-        for j in range(512):
-            if original_levelset[i][j] == 1 or new_levelset[i][j] == 1:
-                result[i][j] = 1
-    return result
+def jaccard_similarity(union_nbr_elements, intersection_nbr_elements):
+    """ Compares similarity between two contours. Returns a value between 0 and 1 (closer to 1 is more similar)."""
+    similarity = intersection_nbr_elements / union_nbr_elements
+    return similarity
 
 
-def multi_seed_classifier(macwe, seed_list, image_bw):
-    u = np.array([[0 for x in range(512)] for y in range(512)])
-    print("Putting seeds on coordinates:")
-    for i in range(len(seed_list)):
-        if u[seed_list[i][0]][seed_list[i][1]] == 0:
-            print(seed_list[i][0], seed_list[i][1])
-            macwe.levelset = circle_levelset(image_bw.shape, (seed_list[i][0], seed_list[i][1]), 4)
-            num_iters = 0
-            temp_1_c0 = 0
-            temp_1_c1 = 0
-            temp_2_c0 = 0
-            temp_2_c1 = 0
-            while True:
-                # Evolve.
-                c0, c1, levelset = macwe.step()
-                if temp_1_c0 == c0 and temp_1_c1 == c1:
-                    break
-                if temp_2_c0 == c0 and temp_2_c1 == c1:
-                    break
-                temp_2_c0, temp_2_c1 = temp_1_c0, temp_1_c1
-                temp_1_c0, temp_1_c1 = c0, c1
-                num_iters += 1
-            u = add_levelset(u, levelset)
-    return u, num_iters
+def get_median(list):
+    list.sort()
+    median = int(len(list)/2)
+    return list[median]
+
+
+def get_mean(list):
+    total = 0
+    for item in list:
+        total = total + item
+    mean = total/len(list)
+    return mean
+
+
+def get_total(list):
+    total = 0
+    for nbr in list:
+        total = total + nbr
+    return total
 
 
 def start_snake(img, img_nbr, validation_pixel_list, seed_list):
@@ -265,14 +340,63 @@ def start_snake(img, img_nbr, validation_pixel_list, seed_list):
 
     # Morphological ACWE. Initialization of the level-set.
     macwe = MorphACWE(image_bw, smoothing=0, lambda1=1, lambda2=1)
-    output_array, num_iters = multi_seed_classifier(macwe, seed_list, image_bw)
-
+    output_array, num_iters = multi_seed(macwe, seed_list, image_bw)
 
     """Comment this line out if no output image is needed"""
-    write_tiff(output_array, img_nbr + "_snake_output.tiff")
+    write_tiff(output_array, "output_snake/" + img_nbr + "_snake_output.tiff")
 
     similarity = error(truth_array, output_array)
     end = time.time()
     execution_time = end - start
 
     return similarity, execution_time, num_iters
+
+
+files = [f for f in os.listdir("Dataset/train") if f.endswith('.shp')]
+shapefiles = [os.path.join("Dataset/train", f)
+              for f in files if f.endswith('.shp')]
+
+directory = "morph"
+
+all_num_iters = []
+all_execution_time = []
+all_similarity = []
+
+for image in os.listdir(directory):
+    if image.endswith('.tif'):
+        print("Image: ", image)
+        image_nbr = image.split(".")
+        raster_image = gdal.Open(os.path.join(directory, image), gdal.GA_ReadOnly)
+        geo_transform = raster_image.GetGeoTransform()
+        projection = raster_image.GetProjectionRef()
+
+        verification_pixels = vectors_to_raster(shapefiles, 512, 512, geo_transform, projection)
+
+        seed_list = get_seeds_from_osm(verification_pixels)
+
+        if len(seed_list) > 0:
+            similarity, execution_time, num_iters = start_snake(raster_image, str(image_nbr[0]), verification_pixels, seed_list)
+            all_execution_time.append(execution_time)
+            all_num_iters.append(num_iters)
+            all_similarity.append(similarity)
+
+        else:
+            print("No seeds found")
+
+
+print(" ")
+print("----------------  RESULT  ------------------")
+print(" ")
+print("Execution time")
+print("Total: ", get_total(all_execution_time))
+print("Mean: ", get_mean(all_execution_time))
+print("Median: ", get_median(all_execution_time))
+print(" ")
+print("Number of iterations")
+print("Total: ", get_total(all_num_iters))
+print("Mean: ", get_mean(all_num_iters))
+print("Median: ", get_median(all_num_iters))
+print(" ")
+print("Similarity")
+print("Mean: ", get_mean(all_similarity))
+print("Median: ", get_median(all_similarity))

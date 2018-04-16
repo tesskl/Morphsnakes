@@ -8,7 +8,8 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.naive_bayes import GaussianNB
 from sklearn.linear_model import LogisticRegression
 import re
-from morphsnakes_large import start_snake
+import time
+
 
 # A list of "random" colors (for a nicer output)
 COLORS = ["#FF0000", "#09780D", "#2930C1"]
@@ -147,6 +148,7 @@ def get_mean(list):
     mean = total/len(list)
     return mean
 
+
 def get_seeds_from_osm(verification_pixels):
     print("Extracting seeds...")
     nbr_squares = 32
@@ -178,6 +180,13 @@ def get_median(list):
     list.sort()
     median = int(len(list)/2)
     return list[median]
+
+
+def get_total(list):
+    total = 0
+    for nbr in list:
+        total = total + nbr
+    return total
 
 
 def water_probabilities(prob):
@@ -223,11 +232,13 @@ def load_training_data(directory, shapefile):
 
 
 def predict_test_data(directory, shapefiles):
+    start = time.time()
     all_num_iters = []
     all_execution_time = []
     all_similarity = []
     all_verification_labels = []
     all_predicted_labels = []
+    list_of_seeds = []
     for image in os.listdir(directory):
         if image.endswith('.tif'):
             print("Image: ", image)
@@ -250,35 +261,42 @@ def predict_test_data(directory, shapefiles):
             result = loaded_model.predict(flat_pixels)
             classification = result.reshape((row, col))
 
-            prob = loaded_model.predict_proba(flat_pixels)
-            list_of_seeds = water_probabilities(prob)
-
-            """Comment this line out if no output image is needed"""
-            #write_geotiff(("output_" + str(image_nbr[0]) + ".tiff"), classification, geo_transform, projection)
-
             verification_pixels = vectors_to_raster(shapefiles, row, col, geo_transform, projection)
             for_verification = np.nonzero(verification_pixels)
-
-            """Extract seed list from classifier"""
-            #prob = loaded_model.predict_proba(flat_pixels)
-            #list_of_seeds = water_probabilities(prob)
-            """Extract seed list from osm truth"""
-            list_of_seeds = get_seeds_from_osm(verification_pixels)
 
             verification_labels = verification_pixels[for_verification]
             predicted_labels = classification[for_verification]
 
-            if len(list_of_seeds) > 0:
+            """Comment this line out if no output image is needed"""
+            write_geotiff(("output_classifier/output_" + str(image_nbr[0]) + ".tiff"), classification, geo_transform, projection)
+
+            all_verification_labels = np.concatenate((all_verification_labels, verification_labels))
+            all_predicted_labels = np.concatenate((all_predicted_labels, predicted_labels))
+
+
+            """Comment this last section out to only run the classifier"""
+
+            """Extract seed list from osm truth"""
+            #list_of_seeds = get_seeds_from_osm(verification_pixels)
+
+            """Extract seed list from classifier"""
+            #prob = loaded_model.predict_proba(flat_pixels)
+            #list_of_seeds = water_probabilities(prob)
+
+            """Start the snake for each image"""
+            """if len(list_of_seeds) > 0:
                 similarity, execution_time, num_iters = start_snake(test_image, str(image_nbr[0]), verification_pixels, list_of_seeds)
                 all_execution_time.append(execution_time)
                 all_num_iters.append(num_iters)
                 all_similarity.append(similarity)
 
-            all_verification_labels = np.concatenate((all_verification_labels, verification_labels))
-            all_predicted_labels = np.concatenate((all_predicted_labels, predicted_labels))
+            else:
+                print("No seeds found")"""
 
-    return all_verification_labels, all_predicted_labels, list_of_seeds, all_similarity, all_num_iters, all_execution_time
+    end = time.time()
+    execution_time_classifier = end - start
 
+    return all_verification_labels, all_predicted_labels, list_of_seeds, all_similarity, all_num_iters, all_execution_time, execution_time_classifier
 
 files = [f for f in os.listdir("Dataset/train") if f.endswith('.shp')]
 
@@ -289,7 +307,7 @@ shapefiles = [os.path.join("Dataset/train", f)
 
 # ----- Train the model -------
 
-"""training_labels, training_samples = load_training_data("set", shapefiles)
+"""training_labels, training_samples = load_training_data("train", shapefiles)
 
 classifier = RandomForestClassifier(n_jobs=4, n_estimators=10)
 model = classifier.fit(training_samples, training_labels)
@@ -301,20 +319,26 @@ pickle.dump(model, open(filename, 'wb'))"""
 
 # ------- Predict -----------
 
+test_directory = "morph"
+
 loaded_model = pickle.load(open('small_model_3bands.sav', 'rb'))
 
 shapefiles_test = [os.path.join("Dataset/test", "%s.shp"%c) for c in classes]
 
-verification_labels, predicted_labels, seed_list, all_similarity, all_num_iters, all_execution_time = predict_test_data("Dataset/test_images", shapefiles_test)
-
+verification_labels, predicted_labels, seed_list, all_similarity, all_num_iters, all_execution_time, execution_time_classifier = predict_test_data(test_directory, shapefiles_test)
 
 
 # -------- Validation --------
 
-print("Mean similarity: ", get_mean(all_similarity))
-
-print("Median: ", get_median(all_similarity))
-
+print(" ")
+print("----------------  RESULT  ------------------")
+print(" ")
+print("---- CLASSIFIER ----")
+print(" ")
+print("Execution time")
+print("Total: ", execution_time_classifier)
+print("Mean: ", execution_time_classifier/(len(os.listdir(test_directory)) - 1))
+print(" ")
 print("Confusion matrix:\n%s" %
       metrics.confusion_matrix(verification_labels, predicted_labels))
 target_names = ['Class %s' % s for s in classes]
@@ -323,3 +347,25 @@ print("Classification report:\n%s" %
                                     target_names=target_names))
 print("Classification accuracy: %f" %
       metrics.accuracy_score(verification_labels, predicted_labels))
+
+
+"""
+print(" ")
+print(" ")
+print("---- SNAKE ----")
+print(" ")
+print("Execution time")
+print(" ")
+print("Total: ", get_total(all_execution_time))
+print("Mean: ", get_mean(all_execution_time))
+print("Median: ", get_median(all_execution_time))
+print(" ")
+print("Number of iterations")
+print(" ")
+print("Total: ", get_total(all_num_iters))
+print("Mean: ", get_mean(all_num_iters))
+print("Median: ", get_median(all_num_iters))
+print(" ")
+print("Similarity")
+print("Mean: ", get_mean(all_similarity))
+print("Median: ", get_median(all_similarity))"""
