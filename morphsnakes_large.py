@@ -342,14 +342,14 @@ def start_snake(img, img_nbr, validation_pixel_list, seed_list):
     image_bw = rgb2gray(img_original)
 
     # Blur image
-    gauss = gaussian_filter(image_bw, sigma=5)
+    gauss = gaussian_filter(image_bw, sigma=1)
 
     # Morphological ACWE. Initialization of the level-set.
     macwe = MorphACWE(gauss, smoothing=0, lambda1=1, lambda2=1)
     output_array, num_iters = multi_seed(macwe, seed_list, gauss)
 
     """Comment this line out if no output image is needed"""
-    write_tiff(output_array, "output_snake/" + img_nbr + "_snake_output.tiff")
+    #write_tiff(output_array, "output_snake/" + img_nbr + "_snake_output.tiff")
 
     similarity = error(truth_array, output_array)
     end = time.time()
