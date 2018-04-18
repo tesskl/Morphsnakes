@@ -198,9 +198,11 @@ def water_probabilities(prob):
 
 
 def load_training_data(directory, shapefile):
+    start = time.time()
     count = 0
     for image in os.listdir(directory):
         if image.endswith('.tif'):
+            print("Image: ", image)
             count += 1
             raster_image = gdal.Open(os.path.join(directory, image), gdal.GA_ReadOnly)
             geo_transform = raster_image.GetGeoTransform()
@@ -228,7 +230,11 @@ def load_training_data(directory, shapefile):
             prev_l = training_l
             prev_s = training_s
 
-    return training_l_result, training_s_result
+    end = time.time()
+
+    total_training_time = end - start
+
+    return training_l_result, training_s_result, total_training_time
 
 
 def predict_test_data(directory, shapefiles):
@@ -247,7 +253,6 @@ def predict_test_data(directory, shapefiles):
             geo_transform = test_image.GetGeoTransform()
             projection = test_image.GetProjectionRef()
             test_image_data = []
-
             for b in range(1, test_image.RasterCount):
                 band = test_image.GetRasterBand(b)
                 test_image_data.append(band.ReadAsArray())
@@ -307,21 +312,26 @@ shapefiles = [os.path.join("Dataset/train", f)
 
 # ----- Train the model -------
 
-"""training_labels, training_samples = load_training_data("train", shapefiles)
+
+"""train_directory = "/Users/lisasilfversten/Google Drive/Kartdata_set/train"
+
+training_labels, training_samples, total_training_time = load_training_data(train_directory, shapefiles)
 
 classifier = RandomForestClassifier(n_jobs=4, n_estimators=10)
 model = classifier.fit(training_samples, training_labels)
 
-filename = 'small_model_3bands.sav'
+filename = 'finalized_model.sav'
 
-pickle.dump(model, open(filename, 'wb'))"""
+pickle.dump(model, open(filename, 'wb'))
+
+print("Total training time: ", total_training_time)"""
 
 
 # ------- Predict -----------
 
-test_directory = "morph"
+test_directory = "/Users/lisasilfversten/Google Drive/Kartdata_set/test"
 
-loaded_model = pickle.load(open('small_model_3bands.sav', 'rb'))
+loaded_model = pickle.load(open('finalized_model.sav', 'rb'))
 
 shapefiles_test = [os.path.join("Dataset/test", "%s.shp"%c) for c in classes]
 
@@ -333,7 +343,7 @@ verification_labels, predicted_labels, seed_list, all_similarity, all_num_iters,
 print(" ")
 print("----------------  RESULT  ------------------")
 print(" ")
-print("---- CLASSIFIER ----")
+print("CLASSIFIER")
 print(" ")
 print("Execution time")
 print("Total: ", execution_time_classifier)
@@ -352,7 +362,7 @@ print("Classification accuracy: %f" %
 """
 print(" ")
 print(" ")
-print("---- SNAKE ----")
+print("SNAKE")
 print(" ")
 print("Execution time")
 print(" ")
