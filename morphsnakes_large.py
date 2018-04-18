@@ -362,17 +362,18 @@ files = [f for f in os.listdir("Dataset/train") if f.endswith('.shp')]
 shapefiles = [os.path.join("Dataset/train", f)
               for f in files if f.endswith('.shp')]
 
-directory = "Dataset/test_images"
+
+test_directory = "morph"
 
 all_num_iters = []
 all_execution_time = []
 all_similarity = []
 
-for image in os.listdir(directory):
+for image in os.listdir(test_directory):
     if image.endswith('.tif'):
         print("Image: ", image)
         image_nbr = image.split(".")
-        raster_image = gdal.Open(os.path.join(directory, image), gdal.GA_ReadOnly)
+        raster_image = gdal.Open(os.path.join(test_directory, image), gdal.GA_ReadOnly)
         geo_transform = raster_image.GetGeoTransform()
         projection = raster_image.GetProjectionRef()
         img_original = raster_image.ReadAsArray()
