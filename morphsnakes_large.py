@@ -3,9 +3,12 @@
 from itertools import cycle
 import numpy as np
 import time
+
 from scipy.ndimage import binary_dilation, binary_erosion
 from osgeo import gdal
 import os
+from scipy.ndimage import gaussian_filter
+
 
 # COLORS = ["#008000", "#003cb3"]
 COLORS = ["#ffffff", "#000000"]
@@ -228,8 +231,8 @@ def multi_seed(macwe, seed_list, image_bw):
 
 def get_seeds_from_osm(verification_pixels):
     print("Extracting seeds...")
-    nbr_squares = 32
-    square_size = 16
+    nbr_squares = 16
+    square_size = 32
     seed_list = []
     for m in range(nbr_squares):
         for k in range(nbr_squares):
@@ -338,9 +341,12 @@ def start_snake(img, img_nbr, validation_pixel_list, seed_list):
     img_original = img.ReadAsArray()
     image_bw = rgb2gray(img_original)
 
+    # Blur image
+    gauss = gaussian_filter(image_bw, sigma=5)
+
     # Morphological ACWE. Initialization of the level-set.
-    macwe = MorphACWE(image_bw, smoothing=0, lambda1=1, lambda2=1)
-    output_array, num_iters = multi_seed(macwe, seed_list, image_bw)
+    macwe = MorphACWE(gauss, smoothing=0, lambda1=1, lambda2=1)
+    output_array, num_iters = multi_seed(macwe, seed_list, gauss)
 
     """Comment this line out if no output image is needed"""
     write_tiff(output_array, "output_snake/" + img_nbr + "_snake_output.tiff")
@@ -356,6 +362,7 @@ files = [f for f in os.listdir("Dataset/train") if f.endswith('.shp')]
 shapefiles = [os.path.join("Dataset/train", f)
               for f in files if f.endswith('.shp')]
 
+
 test_directory = "morph"
 
 all_num_iters = []
@@ -369,6 +376,8 @@ for image in os.listdir(test_directory):
         raster_image = gdal.Open(os.path.join(test_directory, image), gdal.GA_ReadOnly)
         geo_transform = raster_image.GetGeoTransform()
         projection = raster_image.GetProjectionRef()
+        img_original = raster_image.ReadAsArray()
+        image_bw = rgb2gray(img_original)
 
         verification_pixels = vectors_to_raster(shapefiles, 512, 512, geo_transform, projection)
 
