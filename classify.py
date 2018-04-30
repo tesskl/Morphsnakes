@@ -270,7 +270,6 @@ def predict_test_data(directory, shapefiles):
     start = time.time()
     all_num_iters = []
     all_execution_time = []
-    all_similarity = []
     all_verification_labels = []
     all_predicted_labels = []
     list_of_seeds = []
@@ -334,7 +333,7 @@ def predict_test_data(directory, shapefiles):
     end = time.time()
     execution_time_classifier = end - start
 
-    return all_verification_labels, all_predicted_labels, tot_jaccard_sim, list_of_seeds, all_similarity, all_num_iters, all_execution_time, execution_time_classifier
+    return all_verification_labels, all_predicted_labels, tot_jaccard_sim, list_of_seeds, all_num_iters, all_execution_time, execution_time_classifier
 
 files = [f for f in os.listdir("Dataset/train") if f.endswith('.shp')]
 
@@ -368,7 +367,7 @@ loaded_model = pickle.load(open('finalized_model.sav', 'rb'))
 
 shapefiles_test = [os.path.join("Dataset/test", "%s.shp"%c) for c in classes]
 
-verification_labels, predicted_labels, jacc_classifier, seed_list, all_similarity, all_num_iters, all_execution_time, execution_time_classifier = predict_test_data(test_directory, shapefiles_test)
+verification_labels, predicted_labels, jacc_similarity, seed_list, all_num_iters, all_execution_time, execution_time_classifier = predict_test_data(test_directory, shapefiles_test)
 
 
 # -------- Validation --------
@@ -385,10 +384,12 @@ print("Classification report:\n%s" %
 print("Classification accuracy: %f" %
       metrics.accuracy_score(verification_labels, predicted_labels))
 
+
+print(jaccard_similarity_score(verification_labels, predicted_labels))
 print(" ")
 print("Jaccard similarity")
-print("Mean: ", get_mean(jacc_classifier))
-print("Median: ", get_median(jacc_classifier))
+print("Mean: ", get_mean(jacc_similarity))
+print("Median: ", get_median(jacc_similarity))
 print(" ")
 print("Execution time")
 print("Total: ", execution_time_classifier)
