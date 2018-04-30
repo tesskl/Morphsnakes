@@ -9,6 +9,7 @@ from sklearn.naive_bayes import GaussianNB
 from sklearn.linear_model import LogisticRegression
 import re
 import time
+from sklearn.metrics import jaccard_similarity_score
 
 
 # A list of "random" colors (for a nicer output)
@@ -143,7 +144,6 @@ def extract_seeds_squares(probs):
 def get_mean(list):
     total = 0
     for item in list:
-        print(item)
         total = total + item
     mean = total/len(list)
     return mean
@@ -174,6 +174,35 @@ def get_seeds_from_osm(verification_pixels):
                             counter = 0
                             break
     return seed_list
+
+
+def error(truth_mask_array, output_mask_array):
+    """ Create image with error area between output and truth masks.
+    Prepares matrices for calculation of contour similarity"""
+    intersection = np.array([[0 for x in range(len(truth_mask_array))] for y in range(len(truth_mask_array))])
+    union = np.array([[0 for x in range(len(truth_mask_array))] for y in range(len(truth_mask_array))])
+    intersection_nbr_elements = 0
+    union_nbr_elements = 0
+    result = np.array([[0 for x in range(len(truth_mask_array))] for y in range(len(truth_mask_array))])
+    for j in range(len(truth_mask_array)):
+        for i in range(len(truth_mask_array)):
+            if truth_mask_array[j][i] != output_mask_array[j][i]:
+                result[j][i] = 1
+            if truth_mask_array[j][i] == 1 and output_mask_array[j][i] == 1:
+                intersection_nbr_elements += 1
+                intersection[j][i] = 1
+            if truth_mask_array[j][i] == 1 or output_mask_array[j][i] == 1:
+                union_nbr_elements += 1
+                union[j][i] = 1
+    return jaccard_similarity(union_nbr_elements, intersection_nbr_elements)
+
+
+def jaccard_similarity(union_nbr_elements, intersection_nbr_elements):
+    """ Compares similarity between two contours. Returns a value between 0 and 1 (closer to 1 is more similar)."""
+    if union_nbr_elements == 0 and intersection_nbr_elements == 0:
+        return 1.0
+    else:
+        return intersection_nbr_elements / union_nbr_elements
 
 
 def get_median(list):
@@ -245,6 +274,7 @@ def predict_test_data(directory, shapefiles):
     all_verification_labels = []
     all_predicted_labels = []
     list_of_seeds = []
+    tot_jaccard_sim = []
     for image in os.listdir(directory):
         if image.endswith('.tif'):
             print("Image: ", image)
@@ -268,19 +298,22 @@ def predict_test_data(directory, shapefiles):
 
             verification_pixels = vectors_to_raster(shapefiles, row, col, geo_transform, projection)
             for_verification = np.nonzero(verification_pixels)
-
             verification_labels = verification_pixels[for_verification]
             predicted_labels = classification[for_verification]
+            all_verification_labels = np.concatenate((all_verification_labels, verification_labels))
+            all_predicted_labels = np.concatenate((all_predicted_labels, predicted_labels))
+
+            """Calculate jaccard similarity for the output from the RF-classifier"""
+            v = verification_pixels.reshape(512*512)
+            c = classification.reshape(512*512)
+            jacc = jaccard_similarity_score(v, c)
+            print("jacc: ", jacc)
+            tot_jaccard_sim.append(jacc)
 
             """Comment this line out if no output image is needed"""
             write_geotiff(("output_classifier/output_" + str(image_nbr[0]) + ".tiff"), classification, geo_transform, projection)
 
-            all_verification_labels = np.concatenate((all_verification_labels, verification_labels))
-            all_predicted_labels = np.concatenate((all_predicted_labels, predicted_labels))
-
-
             """Comment this last section out to only run the classifier"""
-
             """Extract seed list from osm truth"""
             #list_of_seeds = get_seeds_from_osm(verification_pixels)
 
@@ -301,7 +334,7 @@ def predict_test_data(directory, shapefiles):
     end = time.time()
     execution_time_classifier = end - start
 
-    return all_verification_labels, all_predicted_labels, list_of_seeds, all_similarity, all_num_iters, all_execution_time, execution_time_classifier
+    return all_verification_labels, all_predicted_labels, tot_jaccard_sim, list_of_seeds, all_similarity, all_num_iters, all_execution_time, execution_time_classifier
 
 files = [f for f in os.listdir("Dataset/train") if f.endswith('.shp')]
 
@@ -329,25 +362,19 @@ print("Total training time: ", total_training_time)"""
 
 # ------- Predict -----------
 
-test_directory = "/Users/lisasilfversten/Google Drive/Kartdata_set/test"
+test_directory = "test2"
 
 loaded_model = pickle.load(open('finalized_model.sav', 'rb'))
 
 shapefiles_test = [os.path.join("Dataset/test", "%s.shp"%c) for c in classes]
 
-verification_labels, predicted_labels, seed_list, all_similarity, all_num_iters, all_execution_time, execution_time_classifier = predict_test_data(test_directory, shapefiles_test)
+verification_labels, predicted_labels, jacc_classifier, seed_list, all_similarity, all_num_iters, all_execution_time, execution_time_classifier = predict_test_data(test_directory, shapefiles_test)
 
 
 # -------- Validation --------
 
 print(" ")
 print("----------------  RESULT  ------------------")
-print(" ")
-print("CLASSIFIER")
-print(" ")
-print("Execution time")
-print("Total: ", execution_time_classifier)
-print("Mean: ", execution_time_classifier/(len(os.listdir(test_directory)) - 1))
 print(" ")
 print("Confusion matrix:\n%s" %
       metrics.confusion_matrix(verification_labels, predicted_labels))
@@ -357,6 +384,15 @@ print("Classification report:\n%s" %
                                     target_names=target_names))
 print("Classification accuracy: %f" %
       metrics.accuracy_score(verification_labels, predicted_labels))
+
+print(" ")
+print("Jaccard similarity")
+print("Mean: ", get_mean(jacc_classifier))
+print("Median: ", get_median(jacc_classifier))
+print(" ")
+print("Execution time")
+print("Total: ", execution_time_classifier)
+print("Mean: ", execution_time_classifier/(len(os.listdir(test_directory)) - 1))
 
 
 """
@@ -376,6 +412,6 @@ print("Total: ", get_total(all_num_iters))
 print("Mean: ", get_mean(all_num_iters))
 print("Median: ", get_median(all_num_iters))
 print(" ")
-print("Similarity")
+print("Jaccard similarity")
 print("Mean: ", get_mean(all_similarity))
 print("Median: ", get_median(all_similarity))"""

@@ -8,6 +8,7 @@ from scipy.ndimage import binary_dilation, binary_erosion
 from osgeo import gdal
 import os
 from scipy.ndimage import gaussian_filter
+from sklearn.metrics import jaccard_similarity_score
 
 
 # COLORS = ["#008000", "#003cb3"]
@@ -231,8 +232,8 @@ def multi_seed(macwe, seed_list, image_bw):
 
 def get_seeds_from_osm(verification_pixels):
     print("Extracting seeds...")
-    nbr_squares = 16
-    square_size = 32
+    nbr_squares = 32
+    square_size = 16
     seed_list = []
     for m in range(nbr_squares):
         for k in range(nbr_squares):
@@ -279,7 +280,6 @@ def write_tiff(data, output_path):
 def error(truth_mask_array, output_mask_array):
     """ Create image with error area between output and truth masks.
     Prepares matrices for calculation of contour similarity"""
-
     intersection = np.array([[0 for x in range(len(truth_mask_array))] for y in range(len(truth_mask_array))])
     union = np.array([[0 for x in range(len(truth_mask_array))] for y in range(len(truth_mask_array))])
     intersection_nbr_elements = 0
@@ -342,20 +342,27 @@ def start_snake(img, img_nbr, validation_pixel_list, seed_list):
     image_bw = rgb2gray(img_original)
 
     # Blur image
-    gauss = gaussian_filter(image_bw, sigma=1)
+    gauss = gaussian_filter(image_bw, sigma=3)
 
     # Morphological ACWE. Initialization of the level-set.
     macwe = MorphACWE(gauss, smoothing=0, lambda1=1, lambda2=1)
     output_array, num_iters = multi_seed(macwe, seed_list, gauss)
 
     """Comment this line out if no output image is needed"""
-    #write_tiff(output_array, "output_snake/" + img_nbr + "_snake_output.tiff")
+    write_tiff(output_array, "output_snake/" + img_nbr + "_snake_output1.tiff")
 
-    similarity = error(truth_array, output_array)
+    for j in range(len(truth_array)):
+        for i in range(len(truth_array)):
+            if truth_array[j][i] == 2:
+                truth_array[j][i] = 1
+            else:
+                truth_array[j][i] = 0
+    jaccard = jaccard_similarity_score(truth_array.reshape(512*512), output_array.reshape(512*512))
+
     end = time.time()
     execution_time = end - start
 
-    return similarity, execution_time, num_iters
+    return jaccard, execution_time, num_iters
 
 
 files = [f for f in os.listdir("Dataset/train") if f.endswith('.shp')]
@@ -363,11 +370,11 @@ shapefiles = [os.path.join("Dataset/train", f)
               for f in files if f.endswith('.shp')]
 
 
-test_directory = "morph"
+test_directory = "test2"
 
 all_num_iters = []
 all_execution_time = []
-all_similarity = []
+tot_jacc_similarity = []
 
 for image in os.listdir(test_directory):
     if image.endswith('.tif'):
@@ -384,10 +391,10 @@ for image in os.listdir(test_directory):
         seed_list = get_seeds_from_osm(verification_pixels)
 
         if len(seed_list) > 0:
-            similarity, execution_time, num_iters = start_snake(raster_image, str(image_nbr[0]), verification_pixels, seed_list)
+            jacc, execution_time, num_iters = start_snake(raster_image, str(image_nbr[0]), verification_pixels, seed_list)
             all_execution_time.append(execution_time)
             all_num_iters.append(num_iters)
-            all_similarity.append(similarity)
+            tot_jacc_similarity.append(jacc)
 
         else:
             print("No seeds found")
@@ -406,6 +413,6 @@ print("Total: ", get_total(all_num_iters))
 print("Mean: ", get_mean(all_num_iters))
 print("Median: ", get_median(all_num_iters))
 print(" ")
-print("Similarity")
-print("Mean: ", get_mean(all_similarity))
-print("Median: ", get_median(all_similarity))
+print("Jaccard similarity")
+print("Mean: ", get_mean(tot_jacc_similarity))
+print("Median: ", get_median(tot_jacc_similarity))
