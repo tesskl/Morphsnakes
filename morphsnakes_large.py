@@ -10,7 +10,6 @@ import os
 from scipy.ndimage import gaussian_filter
 from sklearn.metrics import jaccard_similarity_score
 
-
 # COLORS = ["#008000", "#003cb3"]
 COLORS = ["#ffffff", "#000000"]
 RASTERIZE_COLOR_FIELD = "__color__"
@@ -204,13 +203,15 @@ def vectors_to_raster(file_paths, rows, cols, geo_transform, projection):
     return labeled_pixels
 
 
-def multi_seed(macwe, seed_list, image_bw):
+def multi_seed(macwe, seed_list, image_bw, tot_num_seeds):
     u = np.array([[0 for x in range(512)] for y in range(512)])
     print("Putting seeds on coordinates:")
+    num_seeds = 0
     for i in range(len(seed_list)):
         if u[seed_list[i][0]][seed_list[i][1]] == 0:
             print(seed_list[i][0], seed_list[i][1])
             macwe.levelset = circle_levelset(image_bw.shape, (seed_list[i][0], seed_list[i][1]), 4)
+            num_seeds += 1
             num_iters = 0
             temp_1_c0 = 0
             temp_1_c1 = 0
@@ -227,7 +228,8 @@ def multi_seed(macwe, seed_list, image_bw):
                 temp_1_c0, temp_1_c1 = c0, c1
                 num_iters += 1
             u = add_levelset(u, levelset)
-    return u, num_iters
+    tot_num_seeds.append(num_seeds)
+    return u, num_iters, tot_num_seeds
 
 
 def get_seeds_from_osm(verification_pixels):
@@ -309,7 +311,7 @@ def jaccard_similarity(union_nbr_elements, intersection_nbr_elements):
 
 def get_median(list):
     list.sort()
-    median = int(len(list)/2)
+    median = int(len(list) / 2)
     return list[median]
 
 
@@ -317,7 +319,7 @@ def get_mean(list):
     total = 0
     for item in list:
         total = total + item
-    mean = total/len(list)
+    mean = total / len(list)
     return mean
 
 
@@ -328,8 +330,7 @@ def get_total(list):
     return total
 
 
-def start_snake(img, img_nbr, validation_pixel_list, seed_list):
-
+def start_snake(img, img_nbr, validation_pixel_list, seed_list, tot_num_seeds):
     # Start clock
     start = time.time()
 
@@ -337,7 +338,7 @@ def start_snake(img, img_nbr, validation_pixel_list, seed_list):
     truth_array = validation_pixel_list
 
     # Load image
-    #img = gdal.Open(img_path)
+    # img = gdal.Open(img_path)
     img_original = img.ReadAsArray()
     image_bw = rgb2gray(img_original)
 
@@ -346,7 +347,7 @@ def start_snake(img, img_nbr, validation_pixel_list, seed_list):
 
     # Morphological ACWE. Initialization of the level-set.
     macwe = MorphACWE(gauss, smoothing=0, lambda1=1, lambda2=1)
-    output_array, num_iters = multi_seed(macwe, seed_list, gauss)
+    output_array, num_iters, tot_num_seeds = multi_seed(macwe, seed_list, gauss, tot_num_seeds)
 
     """Comment this line out if no output image is needed"""
     write_tiff(output_array, "output_snake/" + img_nbr + "_snake_output1.tiff")
@@ -357,24 +358,24 @@ def start_snake(img, img_nbr, validation_pixel_list, seed_list):
                 truth_array[j][i] = 1
             else:
                 truth_array[j][i] = 0
-    jaccard = jaccard_similarity_score(truth_array.reshape(512*512), output_array.reshape(512*512))
+    jaccard = jaccard_similarity_score(truth_array.reshape(512 * 512), output_array.reshape(512 * 512))
 
     end = time.time()
     execution_time = end - start
 
-    return jaccard, execution_time, num_iters
+    return jaccard, execution_time, num_iters, tot_num_seeds
 
 
 files = [f for f in os.listdir("Dataset/train") if f.endswith('.shp')]
 shapefiles = [os.path.join("Dataset/train", f)
               for f in files if f.endswith('.shp')]
 
-
-test_directory = "test2"
+test_directory = "Dataset/test_images"
 
 all_num_iters = []
 all_execution_time = []
 tot_jacc_similarity = []
+tot_num_seeds = []
 
 for image in os.listdir(test_directory):
     if image.endswith('.tif'):
@@ -391,14 +392,14 @@ for image in os.listdir(test_directory):
         seed_list = get_seeds_from_osm(verification_pixels)
 
         if len(seed_list) > 0:
-            jacc, execution_time, num_iters = start_snake(raster_image, str(image_nbr[0]), verification_pixels, seed_list)
+            jacc, execution_time, num_iters, tot_num_seeds = start_snake(raster_image, str(image_nbr[0]),
+                                                                         verification_pixels, seed_list, tot_num_seeds)
             all_execution_time.append(execution_time)
             all_num_iters.append(num_iters)
             tot_jacc_similarity.append(jacc)
 
         else:
             print("No seeds found")
-
 
 print(" ")
 print("----------------  RESULT  ------------------")
@@ -416,3 +417,8 @@ print(" ")
 print("Jaccard similarity")
 print("Mean: ", get_mean(tot_jacc_similarity))
 print("Median: ", get_median(tot_jacc_similarity))
+print(" ")
+print("Number of seeds")
+print("Total: ", get_total(tot_num_seeds))
+print("Mean: ", get_mean(tot_num_seeds))
+print("Median: ", get_median(tot_num_seeds))
